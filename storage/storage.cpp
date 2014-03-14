@@ -87,6 +87,8 @@ public:
 Storage::Storage() : m_downloader(new HttpMapFilesDownloader()), m_currentSlotId(0)
 {
   LoadCountriesFile(false /* forceReload */);
+
+  TorrentTest::Start();
 }
 
 void Storage::Init(TUpdate const & update) { m_update = update; }

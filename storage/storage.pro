@@ -8,7 +8,9 @@ ROOT_DIR = ..
 
 include($$ROOT_DIR/common.pri)
 
-INCLUDEPATH += $$ROOT_DIR/3party/jansson/src
+DEFINES += BOOST_ASIO_SEPARATE_COMPILATION
+
+INCLUDEPATH += $$ROOT_DIR/3party/jansson/src $$ROOT_DIR/3party/torrent/include
 
 HEADERS += \
   country.hpp \
@@ -22,6 +24,7 @@ HEADERS += \
   simple_tree.hpp \
   storage.hpp \
   storage_defines.hpp \
+  torrent_test.hpp \
 
 SOURCES += \
   country.cpp \
@@ -32,3 +35,4 @@ SOURCES += \
   queued_country.cpp \
   storage.cpp \
   storage_defines.cpp \
+  torrent_test.cpp \
