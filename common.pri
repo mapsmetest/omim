@@ -84,6 +84,9 @@ for(project, DEPENDENCIES) {
 
 #INCLUDEPATH += $$ROOT_DIR/3party/protobuf/src/
 
+# For libtorrent
+DEFINES *= BOOST_ASIO_SEPARATE_COMPILATION
+
 # Windows-specific options for all projects
 win32 {
   DEFINES += _WIN32_WINNT=0x0501

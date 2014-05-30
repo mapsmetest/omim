@@ -8,8 +8,6 @@ ROOT_DIR = ..
 
 include($$ROOT_DIR/common.pri)
 
-DEFINES += BOOST_ASIO_SEPARATE_COMPILATION
-
 INCLUDEPATH += $$ROOT_DIR/3party/jansson/src $$ROOT_DIR/3party/torrent/include
 
 HEADERS += \
