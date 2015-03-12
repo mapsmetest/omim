@@ -49,7 +49,13 @@ static int32_t wait(NVEventSync * sem, pthread_mutex_t * mutex, int waitMS)
     if( waitMS < 0 )
       return pthread_cond_wait(&sem->m_cond, mutex);
     else
-      return pthread_cond_timeout_np(&sem->m_cond, mutex, (unsigned)waitMS);
+    {
+      struct timespec ts;
+      ::clock_gettime(CLOCK_REALTIME, &ts);
+      ts.tv_sec += waitMS / 1000;
+      ts.tv_nsec += (waitMS % 1000) * 1000000;
+      return pthread_cond_timedwait(&sem->m_cond, mutex, &ts);
+    }
   }
   else
   {
