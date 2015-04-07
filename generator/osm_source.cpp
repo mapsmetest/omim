@@ -1,16 +1,19 @@
 #include "generator/coastlines_generator.hpp"
+#include "generator/data_cache_file.hpp"
 #include "generator/feature_generator.hpp"
-#include "generator/intermediate_data.hpp"
-#include "generator/intermediate_elements.hpp"
-#include "generator/osm_translator.hpp"
-#include "generator/osm_o5m_source.hpp"
-#include "generator/osm_xml_source.hpp"
+#include "generator/first_pass_parser.hpp"
+#include "generator/osm_decl.hpp"
+#include "generator/osm_element.hpp"
 #include "generator/osm_source.hpp"
 #include "generator/polygonizer.hpp"
-#include "generator/world_map_generator.hpp"
-#include "generator/osm_element.hpp"
+#include "generator/point_storage.hpp"
 #include "generator/source_reader.hpp"
+#include "generator/world_map_generator.hpp"
+#include "generator/xml_element.hpp"
 
+#include "defines.hpp"
+
+#include "indexer/mercator.hpp"
 #include "indexer/classificator.hpp"
 #include "indexer/mercator.hpp"
 
@@ -18,13 +21,7 @@
 
 #include "std/fstream.hpp"
 
-#include "defines.hpp"
-
-SourceReader::SourceReader()
-: m_file(unique_ptr<istream, Deleter>(&cin, Deleter(false)))
-{
-  LOG_SHORT(LINFO, ("Reading OSM data from stdin"));
-}
+#define DECODE_O5M_COORD(coord) (static_cast<double>(coord) / 1E+7)
 
 namespace feature
 {
