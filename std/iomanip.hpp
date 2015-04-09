@@ -12,6 +12,7 @@ using std::left;
 using std::setfill;
 using std::setprecision;
 using std::setw;
+using std::uppercase;
 
 // TODO: Should we force clang/libc++ here?
 #ifndef OMIM_OS_LINUX
