@@ -9,6 +9,7 @@
 #include "generator/polygonizer.hpp"
 #include "generator/world_map_generator.hpp"
 #include "generator/osm_element.hpp"
+#include "generator/source_reader.hpp"
 
 #include "indexer/classificator.hpp"
 #include "indexer/mercator.hpp"
@@ -25,27 +26,7 @@ SourceReader::SourceReader()
   LOG_SHORT(LINFO, ("Reading OSM data from stdin"));
 }
 
-SourceReader::SourceReader(string const & filename)
-{
-  m_file = unique_ptr<istream, Deleter>(new ifstream(filename), Deleter());
-  CHECK(static_cast<ifstream *>(m_file.get())->is_open() , ("Can't open file:", filename));
-  LOG_SHORT(LINFO, ("Reading OSM data from", filename));
-}
-
-SourceReader::SourceReader(istringstream & stream)
-: m_file(unique_ptr<istream, Deleter>(&stream, Deleter(false)))
-{
-  LOG_SHORT(LINFO, ("Reading OSM data from memory"));
-}
-
-uint64_t SourceReader::Read(char * buffer, uint64_t bufferSize)
-{
-  m_file->read(buffer, bufferSize);
-  return m_file->gcount();
-}
-
-
-namespace
+namespace feature
 {
 template <class TNodesHolder, cache::EMode TMode>
 class IntermediateData
