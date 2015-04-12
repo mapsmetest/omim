@@ -141,9 +141,10 @@ extern NSString * kOSMPasswordKey;
     editedFields.CreateChange(edit::MWMLink(lat, lon, buildingType), changes);
     // TODO: What if user does not have login and password in the settings?
     NSUserDefaults * settings = [NSUserDefaults standardUserDefaults];
-    string const user = [[settings objectForKey:kOSMLoginKey] UTF8String];
-    string const password = [[settings objectForKey:kOSMPasswordKey] UTF8String];
-    editedFields.UploadChangeset(user, password);
+    NSString * login = [settings objectForKey:kOSMLoginKey];
+    NSString * password = [settings objectForKey:kOSMPasswordKey];
+    if (login && password)
+      editedFields.UploadChangeset([login UTF8String], [password UTF8String]);
   }
 }
 
