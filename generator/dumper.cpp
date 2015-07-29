@@ -6,6 +6,9 @@
 #include "indexer/feature_processor.hpp"
 #include "indexer/search_trie.hpp"
 
+#include "platform/local_country_file_utils.hpp"
+#include "platform/platform.hpp"
+
 #include "coding/multilang_utf8_string.hpp"
 
 #include "base/logging.hpp"
@@ -214,6 +217,83 @@ namespace feature
       cout << f.tokens.top().first << " '" << strings::ToUtf8(s) << "'" << endl;
       f.tokens.pop();
     }
+  }
+
+  struct UnicodeStatistics {
+    map<strings::UniChar, pair<size_t, set<int8_t>>> m_container;
+    void operator()(FeatureType & f, uint32_t) {
+      f.ForEachNameRef(*this);
+    }
+    bool operator()(int8_t language, string const & name) {
+      using namespace strings;
+      UniString const uName = MakeUniString(name);
+      for (size_t i = 0; i < uName.size(); ++i) {
+        auto & counter = m_container[uName[i]];
+        ++counter.first;
+        counter.second.insert(language);
+      }
+      return true; // true to process names for all languages.
+    }
+  };
+
+  void DumpUnicodeCharsUsage(string const & fPath)
+  {
+    UnicodeStatistics processor;
+    if (!Platform::IsFileExistsByFullPath(fPath))
+    {
+      vector<platform::LocalCountryFile> maps;
+      platform::FindAllLocalMaps(maps);
+      for (auto const & map : maps)
+      {
+        string const path = map.GetPath(MapOptions::Map);
+        if (Platform::IsFileExistsByFullPath(path))
+          feature::ForEachFromDat(path, processor);
+        else
+        {
+          string const worldPath = fPath.substr(0, fPath.find_last_of('/')) + path;
+          if (Platform::IsFileExistsByFullPath(worldPath))
+            feature::ForEachFromDat(worldPath, processor);
+          else
+            LOG(LWARNING, ("Can't open full path", worldPath));
+        }
+      }
+    }
+    else
+    {
+      feature::ForEachFromDat(fPath, processor);
+    }
+    for (auto const & symbol : processor.m_container)
+    {
+      cout << "U+" << setw(4) << setfill('0') << hex << std::uppercase << symbol.first << " " << dec;
+      size_t const langsCount = symbol.second.second.size();
+      cout << langsCount << " ";
+      if (langsCount <= 3)
+      {
+        for (auto const lang : symbol.second.second)
+          cout << StringUtf8Multilang::GetLangByCode(lang) << " ";
+      }
+      cout << "(" << symbol.second.first << ")" << endl;
+    }
+
+    // Sort by total occurence count.
+//    multimap<size_t, pair<strings::UniChar, set<int8_t>>, greater<size_t>> sorted;
+//    for (auto const & symbol : processor.m_container)
+//      sorted.insert(make_pair(symbol.second.first, make_pair(symbol.first, symbol.second.second)));
+
+    // Display result.
+//    for (auto const & symbol : sorted)
+//    {
+////      cout << strings::ToUtf8(strings::UniString(1, symbol.second.first)) << " ";
+//      cout << "U+" << setw(4) << setfill('0') << hex << std::uppercase << symbol.second.first << " ";
+//      size_t const langsCount = symbol.second.second.size();
+//      cout << langsCount << " ";
+//      if (langsCount <= 2)
+//      {
+//        for (auto const lang : symbol.second.second)
+//          cout << StringUtf8Multilang::GetLangByCode(lang) << " ";
+//      }
+//      cout << "(" << symbol.first << ")" << endl;
+//    }
   }
 
 }  // namespace feature

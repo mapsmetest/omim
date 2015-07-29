@@ -6,6 +6,7 @@
 #endif
 
 #include <iomanip>
+using std::dec;
 using std::fixed;
 using std::hex;
 using std::left;
