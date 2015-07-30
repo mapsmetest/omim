@@ -30,6 +30,15 @@ def komap_mapswithme(options, style, filename):
     visibility = {}
     textures = {}
 
+    colors_file_name = os.path.join(ddir, 'colors.txt')
+    colors = set()
+    if os.path.exists(colors_file_name):
+        colors_in_file = open(colors_file_name, "r")
+        for colorLine in colors_in_file:
+            colors.add(int(colorLine))
+        colors_in_file.close()
+    colors_file = open(colors_file_name, "w")
+
     for row in csv.reader(open(os.path.join(ddir, 'mapcss-mapping.csv')), delimiter=';'):
         pairs = [i.strip(']').split("=") for i in row[1].split(',')[0].split('[')]
         kv = {}
@@ -62,7 +71,9 @@ def komap_mapswithme(options, style, filename):
         opacity = hex(255 - int(255 * float(st.get(prefix + "opacity", 1))))
         color = whatever_to_hex(st.get(prefix + 'color', default))
         color = color[1] + color[1] + color[3] + color[3] + color[5] + color[5]
-        return int(opacity + color, 16)
+        result = int(opacity + color, 16)
+        colors.add(result)
+        return result
 
     def mwm_encode_image(st, prefix='icon', bgprefix='symbol'):
         if prefix:
@@ -385,6 +396,10 @@ def komap_mapswithme(options, style, filename):
         print >> classificator_file, "    " * i + "{}"
 
     # atwrite.Stop()
+
+    for c in sorted(colors):
+        colors_file.write("%d\n" % (c))
+    colors_file.close()
 
     # print "build, sec: %s" % (atbuild.ElapsedSec())
     # print "zstyle %s times, sec: %s" % (atzstyles.Count(), atzstyles.ElapsedSec())
