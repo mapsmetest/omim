@@ -196,6 +196,7 @@ namespace graphics
     {
       try
       {
+        LOG(LINFO, ("Adding font", fontNames[i]));
         addFont(fontNames[i].c_str());
       }
       catch (RootException const & ex)
@@ -205,7 +206,7 @@ namespace graphics
     }
   }
 
-  void GlyphCacheImpl::addFont(char const * fileName)
+  void GlyphCacheImpl::addFont(string const & fileName)
   {
     if (m_isDebugging)
       return;
@@ -258,14 +259,14 @@ namespace graphics
         // checking blacklist and whitelist
 
         for (size_t i = 0; i < ubIt->m_blacklist.size(); ++i)
-          if (ubIt->m_blacklist[i] == fileName)
+          if (fileName.find(ubIt->m_blacklist[i]) != string::npos)
           {
             // if font is blacklisted for this unicode block
             ubIt->m_coverage.back() = -1;
           }
 
         for (size_t i = 0; i < ubIt->m_whitelist.size(); ++i)
-          if (ubIt->m_whitelist[i] == fileName)
+          if (fileName.find(ubIt->m_whitelist[i]) != string::npos)
           {
             if (ubIt->m_coverage.back() == -1)
             {

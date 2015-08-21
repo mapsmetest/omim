@@ -81,7 +81,7 @@ namespace graphics
     void initFonts(string const & whiteListFile, string const & blackListFile);
 
     vector<shared_ptr<Font> > & getFonts(strings::UniChar sym);
-    void addFont(char const * fileName);
+    void addFont(string const & fileName);
     void addFonts(vector<string> const & fontNames);
 
     int getCharIDX(shared_ptr<Font> const & font, strings::UniChar symbolCode);

@@ -22,6 +22,17 @@
 
 void Platform::GetSystemFontNames(FilesList & res) const
 {
+  string const kSystemFontsPath =
+#ifdef OMIM_OS_MAC
+  "/Users/alexz/Downloads/android_fonts/";
+#else
+  "/system/fonts/";
+#endif
+  GetFilesByRegExp(kSystemFontsPath, "\\.[ttf|otf|ttc]", res);
+  for (auto & file : res) {
+    file = my::JoinFoldersToPath(kSystemFontsPath, file);
+  }
+/*
 #if defined(OMIM_OS_MAC) || defined(OMIM_OS_IPHONE)
 #else
   char const * fontsWhitelist[] = {
@@ -105,6 +116,7 @@ void Platform::GetSystemFontNames(FilesList & res) const
     }
   }
 #endif
+*/
 }
 
 // static
