@@ -18,18 +18,12 @@
 import re
 import os
 import logging
-from hashlib import md5
-
-from copy import copy, deepcopy
-
-
 from StyleChooser import StyleChooser
 from Condition import Condition
 
 
 NEEDED_KEYS = set(["width", "casing-width", "fill-color", "fill-image", "icon-image", "text", "extrude",
                    "background-image", "background-color", "pattern-image", "shield-text", "symbol-shape"])
-
 
 WHITESPACE = re.compile(r'^ \s+ ', re.S | re.X)
 
@@ -44,6 +38,7 @@ DECLARATION = re.compile(r'^ \{(.+?)\} \s* ', re.S | re.X)
 IMPORT = re.compile(r'^@import\("(.+?)"\); \s* ', re.S | re.X)
 VARIABLE_SET = re.compile(r'^@([a-z][\w\d]*) \s* : \s* (.+?) \s* ; \s* ', re.S | re.X | re.I)
 UNKNOWN = re.compile(r'^ (\S+) \s* ', re.S | re.X)
+APPLY_IF_CONDITION = re.compile(r'^\s*\[\s*apply_if\s*=\s*(.+?)]\s*', re.S | re.X)
 
 ZOOM_MINMAX = re.compile(r'^ (\d+)\-(\d+) $', re.S | re.X)
 ZOOM_MIN = re.compile(r'^ (\d+)\-      $', re.S | re.X)
@@ -77,6 +72,7 @@ oOBJECT = 5
 oDECLARATION = 6
 oSUBPART = 7
 oVARIABLE_SET = 8
+oAPPLY_IF_CONDITION = 9
 
 DASH = re.compile(r'\-/g')
 COLOR = re.compile(r'color$/')
@@ -104,6 +100,7 @@ class MapCSS():
         self.choosers_by_type_and_tag = {}
         self.variables = {}
         self.style_loaded = False
+        self.apply_ifs = []
 
     def parseZoom(self, s):
         if ZOOM_MINMAX.match(s):
@@ -139,19 +136,16 @@ class MapCSS():
                     tmp.append(ec)
             self.choosers_by_type_and_tag[type][tag] = tmp
 
-    def get_style(self, clname, type, tags={}, zoom=0, scale=1, zscale=.5, cache=True):
+    def get_style(self, clname, type, tags={}, zoom=0, scale=1, zscale=.5, apply_if=None):
         """
         Kothic styling API
         """
-        if cache:
-            shash = md5(repr(type) + repr(tags) + repr(zoom)).digest()
-            if shash in self.cache["style"]:
-                return deepcopy(self.cache["style"][shash])
         style = []
         if type in self.choosers_by_type_and_tag:
             choosers = self.choosers_by_type_and_tag[type][clname]
             for chooser in choosers:
-                style = chooser.updateStyles(style, type, tags, zoom, scale, zscale)
+                if apply_if == chooser.apply_if:
+                    style = chooser.updateStyles(style, type, tags, zoom, scale, zscale)
         style = [x for x in style if x["object-id"] != "::*"]
         for x in style:
             for k, v in [('width', 0), ('casing-width', 0)]:
@@ -163,13 +157,10 @@ class MapCSS():
             if not NEEDED_KEYS.isdisjoint(x):
                 st.append(x)
         style = st
-
-        if cache:
-            self.cache["style"][shash] = deepcopy(style)
         return style
 
-    def get_style_dict(self, clname, type, tags={}, zoom=0, scale=1, zscale=.5, olddict={}, cache=True):
-        r = self.get_style(clname, type, tags, zoom, scale, zscale, cache)
+    def get_style_dict(self, clname, type, tags={}, zoom=0, scale=1, zscale=.5, olddict={}, apply_if=None):
+        r = self.get_style(clname, type, tags, zoom, scale, zscale, apply_if)
         d = olddict
         for x in r:
             if x.get('object-id', '') not in d:
@@ -250,6 +241,16 @@ class MapCSS():
                         css = GROUP.sub("", css)
                         sc.newGroup()
                         previous = oGROUP
+
+                    # ApplyIfCondition - [apply_if=...]
+                    elif APPLY_IF_CONDITION.match(css):
+                        if (previous != oGROUP):
+                            raise Exception("',' is expected before an apply_if")
+                        cond = APPLY_IF_CONDITION.match(css).groups()[0]
+                        log.debug("apply_if condition found: %s" % (cond))
+                        css = APPLY_IF_CONDITION.sub("", css)
+                        sc.setApplyIf(cond)
+                        previous = oAPPLY_IF_CONDITION
 
                     # Condition - [highway=primary]
                     elif CONDITION.match(css):
@@ -357,6 +358,8 @@ class MapCSS():
             pass
 
         for chooser in self.choosers:
+            if chooser.apply_if not in self.apply_ifs:
+                self.apply_ifs.append(chooser.apply_if)
             for t in chooser.compatible_types:
                 if t not in self.choosers_by_type:
                     self.choosers_by_type[t] = [chooser]

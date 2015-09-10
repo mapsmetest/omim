@@ -3569,6 +3569,7 @@ const int DrawElementProto::kCaptionFieldNumber;
 const int DrawElementProto::kCircleFieldNumber;
 const int DrawElementProto::kPathTextFieldNumber;
 const int DrawElementProto::kShieldFieldNumber;
+const int DrawElementProto::kApplyIfFieldNumber;
 #endif  // !_MSC_VER
 
 DrawElementProto::DrawElementProto()
@@ -3624,6 +3625,7 @@ DrawElementProto::DrawElementProto(const DrawElementProto& from)
 }
 
 void DrawElementProto::SharedCtor() {
+  ::google::protobuf::internal::GetEmptyString();
   _cached_size_ = 0;
   scale_ = 0;
   area_ = NULL;
@@ -3632,6 +3634,7 @@ void DrawElementProto::SharedCtor() {
   circle_ = NULL;
   path_text_ = NULL;
   shield_ = NULL;
+  apply_if_ = const_cast< ::std::string*>(&::google::protobuf::internal::GetEmptyStringAlreadyInited());
   ::memset(_has_bits_, 0, sizeof(_has_bits_));
 }
 
@@ -3641,6 +3644,9 @@ DrawElementProto::~DrawElementProto() {
 }
 
 void DrawElementProto::SharedDtor() {
+  if (apply_if_ != &::google::protobuf::internal::GetEmptyStringAlreadyInited()) {
+    delete apply_if_;
+  }
   #ifdef GOOGLE_PROTOBUF_NO_STATIC_INITIALIZER
   if (this != &default_instance()) {
   #else
@@ -3695,6 +3701,11 @@ void DrawElementProto::Clear() {
     }
     if (has_shield()) {
       if (shield_ != NULL) shield_->::ShieldRuleProto::Clear();
+    }
+  }
+  if (has_apply_if()) {
+    if (apply_if_ != &::google::protobuf::internal::GetEmptyStringAlreadyInited()) {
+      apply_if_->clear();
     }
   }
   lines_.Clear();
@@ -3818,6 +3829,19 @@ bool DrawElementProto::MergePartialFromCodedStream(
         } else {
           goto handle_unusual;
         }
+        if (input->ExpectTag(74)) goto parse_apply_if;
+        break;
+      }
+
+      // optional string apply_if = 9;
+      case 9: {
+        if (tag == 74) {
+         parse_apply_if:
+          DO_(::google::protobuf::internal::WireFormatLite::ReadString(
+                input, this->mutable_apply_if()));
+        } else {
+          goto handle_unusual;
+        }
         if (input->ExpectAtEnd()) goto success;
         break;
       }
@@ -3894,6 +3918,12 @@ void DrawElementProto::SerializeWithCachedSizes(
       8, this->shield(), output);
   }
 
+  // optional string apply_if = 9;
+  if (has_apply_if()) {
+    ::google::protobuf::internal::WireFormatLite::WriteStringMaybeAliased(
+      9, this->apply_if(), output);
+  }
+
   output->WriteRaw(unknown_fields().data(),
                    unknown_fields().size());
   // @@protoc_insertion_point(serialize_end:DrawElementProto)
@@ -3953,6 +3983,15 @@ int DrawElementProto::ByteSize() const {
     }
 
   }
+  if (_has_bits_[8 / 32] & (0xffu << (8 % 32))) {
+    // optional string apply_if = 9;
+    if (has_apply_if()) {
+      total_size += 1 +
+        ::google::protobuf::internal::WireFormatLite::StringSize(
+          this->apply_if());
+    }
+
+  }
   // repeated .LineRuleProto lines = 2;
   total_size += 1 * this->lines_size();
   for (int i = 0; i < this->lines_size(); i++) {
@@ -4000,6 +4039,11 @@ void DrawElementProto::MergeFrom(const DrawElementProto& from) {
       mutable_shield()->::ShieldRuleProto::MergeFrom(from.shield());
     }
   }
+  if (from._has_bits_[8 / 32] & (0xffu << (8 % 32))) {
+    if (from.has_apply_if()) {
+      set_apply_if(from.apply_if());
+    }
+  }
   mutable_unknown_fields()->append(from.unknown_fields());
 }
 
@@ -4044,6 +4088,7 @@ void DrawElementProto::Swap(DrawElementProto* other) {
     std::swap(circle_, other->circle_);
     std::swap(path_text_, other->path_text_);
     std::swap(shield_, other->shield_);
+    std::swap(apply_if_, other->apply_if_);
     std::swap(_has_bits_[0], other->_has_bits_[0]);
     _unknown_fields_.swap(other->_unknown_fields_);
     std::swap(_cached_size_, other->_cached_size_);

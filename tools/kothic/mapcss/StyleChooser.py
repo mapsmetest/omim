@@ -87,6 +87,7 @@ class StyleChooser:
         self.selzooms = None
         self.compatible_types = set()
         self.has_evals = False
+        self.apply_if = None
 
     def extract_tags(self):
         a = set()
@@ -205,6 +206,13 @@ class StyleChooser:
         """
         c = OptimizeCondition(c)
         self.ruleChains[-1].conditions.append(c)
+
+    def setApplyIf(self, a):
+        # print "applyIf='%s'" % (a)
+        """
+        sets apply_if condition to the StyleChooser
+        """
+        self.apply_if = a
 
     def addStyles(self, a):
         # print "addStyle ", a

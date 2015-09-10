@@ -102,247 +102,253 @@ def komap_mapswithme(options, style, filename):
 
     # atbuild.Stop()
 
-    for cl in class_order:
-        visstring = ["0"] * (options.maxzoom - options.minzoom + 1)
+    for apply_if in style.apply_ifs:
+        # print "apply_if = %s" % (apply_if)
 
-        clname = cl if cl.find('-') == -1 else cl[:cl.find('-')]
-        # clname = cl
-        txclass = classificator[cl]
-        txclass["name"] = "name"
-        txclass["addr:housenumber"] = "addr:housenumber"
-        txclass["ref"] = "ref"
-        txclass["int_name"] = "int_name"
-        txclass["addr:flats"] = "addr:flats"
+        for cl in class_order:
+            visstring = ["0"] * (options.maxzoom - options.minzoom + 1)
 
-        prev_area_len = -1
-        prev_node_len = -1
-        prev_line_len = -1
-        check_area = True
-        check_node = True
-        check_line = True
+            clname = cl if cl.find('-') == -1 else cl[:cl.find('-')]
+            # clname = cl
+            txclass = classificator[cl]
+            txclass["name"] = "name"
+            txclass["addr:housenumber"] = "addr:housenumber"
+            txclass["ref"] = "ref"
+            txclass["int_name"] = "int_name"
+            txclass["addr:flats"] = "addr:flats"
 
-        # atzstyles.Start()
+            prev_area_len = -1
+            prev_node_len = -1
+            prev_line_len = -1
+            check_area = True
+            check_node = True
+            check_line = True
 
-        zstyles_arr = [None] * (options.maxzoom - options.minzoom + 1)
-        has_icons_for_areas_arr = [False] * (options.maxzoom - options.minzoom + 1)
+            # atzstyles.Start()
 
-        for zoom in xrange(options.maxzoom, options.minzoom - 1, -1):
-            has_icons_for_areas = False
-            zstyle = {}
+            zstyles_arr = [None] * (options.maxzoom - options.minzoom + 1)
+            has_icons_for_areas_arr = [False] * (options.maxzoom - options.minzoom + 1)
 
-            if check_line:
-                if "area" not in txclass:
-                    # atline.Start()
-                    linestyle = style.get_style_dict(clname, "line", txclass, zoom, olddict=zstyle, cache=False)
-                    if prev_line_len == -1:
-                        prev_line_len = len(linestyle)
-                    if len(linestyle) == 0:
-                        if prev_line_len != 0:
-                            check_line = False
-                    zstyle = linestyle
-                    # atline.Stop()
+            for zoom in xrange(options.maxzoom, options.minzoom - 1, -1):
+                has_icons_for_areas = False
+                zstyle = {}
 
-            if check_area:
-                # atarea.Start()
-                areastyle = style.get_style_dict(clname, "area", txclass, zoom, olddict=zstyle, cache=False)
-                for st in areastyle.values():
-                    if "icon-image" in st or 'symbol-shape' in st or 'symbol-image' in st:
-                        has_icons_for_areas = True
-                        break
-                if prev_area_len == -1:
-                    prev_area_len = len(areastyle)
-                if len(areastyle) == 0:
-                    if prev_area_len != 0:
-                        check_area = False
-                zstyle = areastyle
-                # atarea.Stop()
+                if check_line:
+                    if "area" not in txclass:
+                        # atline.Start()
+                        linestyle = style.get_style_dict(clname, "line", txclass, zoom, olddict=zstyle, apply_if=apply_if)
+                        if prev_line_len == -1:
+                            prev_line_len = len(linestyle)
+                        if len(linestyle) == 0:
+                            if prev_line_len != 0:
+                                check_line = False
+                        zstyle = linestyle
+                        # atline.Stop()
 
-            if check_node:
-                if "area" not in txclass:
-                    # atnode.Start()
-                    nodestyle = style.get_style_dict(clname, "node", txclass, zoom, olddict=zstyle, cache=False)
-                    if prev_node_len == -1:
-                        prev_node_len = len(nodestyle)
-                    if len(nodestyle) == 0:
-                        if prev_node_len != 0:
-                            check_node = False
-                    zstyle = nodestyle
-                    # atnode.Stop()
+                if check_area:
+                    # atarea.Start()
+                    areastyle = style.get_style_dict(clname, "area", txclass, zoom, olddict=zstyle, apply_if=apply_if)
+                    for st in areastyle.values():
+                        if "icon-image" in st or 'symbol-shape' in st or 'symbol-image' in st:
+                            has_icons_for_areas = True
+                            break
+                    if prev_area_len == -1:
+                        prev_area_len = len(areastyle)
+                    if len(areastyle) == 0:
+                        if prev_area_len != 0:
+                            check_area = False
+                    zstyle = areastyle
+                    # atarea.Stop()
 
-            if not check_line and not check_area and not check_node:
-                break
+                if check_node:
+                    if "area" not in txclass:
+                        # atnode.Start()
+                        nodestyle = style.get_style_dict(clname, "node", txclass, zoom, olddict=zstyle, apply_if=apply_if)
+                        if prev_node_len == -1:
+                            prev_node_len = len(nodestyle)
+                        if len(nodestyle) == 0:
+                            if prev_node_len != 0:
+                                check_node = False
+                        zstyle = nodestyle
+                        # atnode.Stop()
 
-            zstyle = zstyle.values()
+                if not check_line and not check_area and not check_node:
+                    break
 
-            zstyles_arr[zoom - options.minzoom] = zstyle
-            has_icons_for_areas_arr[zoom - options.minzoom]= has_icons_for_areas
+                zstyle = zstyle.values()
 
-        # atzstyles.Stop()
+                zstyles_arr[zoom - options.minzoom] = zstyle
+                has_icons_for_areas_arr[zoom - options.minzoom]= has_icons_for_areas
 
-        # atdrcont.Start()
+            # atzstyles.Stop()
 
-        dr_cont = ClassifElementProto()
-        dr_cont.name = cl
-        for zoom in xrange(options.minzoom, options.maxzoom + 1):
-            zstyle = zstyles_arr[zoom - options.minzoom]
-            if zstyle is None or len(zstyle) == 0:
-                continue
-            has_icons_for_areas = has_icons_for_areas_arr[zoom - options.minzoom]
+            # atdrcont.Start()
 
-            has_lines = False
-            has_icons = False
-            has_fills = False
-            for st in zstyle:
-                st = dict([(k, v) for k, v in st.iteritems() if str(v).strip(" 0.")])
-                if 'width' in st or 'pattern-image' in st:
-                    has_lines = True
-                if 'icon-image' in st or 'symbol-shape' in st or 'symbol-image' in st:
-                    has_icons = True
-                if 'fill-color' in st:
-                    has_fills = True
+            dr_cont = ClassifElementProto()
+            dr_cont.name = cl
+            for zoom in xrange(options.minzoom, options.maxzoom + 1):
+                zstyle = zstyles_arr[zoom - options.minzoom]
+                if zstyle is None or len(zstyle) == 0:
+                    continue
+                has_icons_for_areas = has_icons_for_areas_arr[zoom - options.minzoom]
 
-            has_text = None
-            txfmt = []
-            for st in zstyle:
-                if st.get('text') and not st.get('text') in txfmt:
-                    txfmt.append(st.get('text'))
-                    if has_text is None:
-                        has_text = []
-                    has_text.append(st)
-
-            if has_lines or has_text or has_fills or has_icons:
-                visstring[zoom] = "1"
-                dr_element = DrawElementProto()
-                dr_element.scale = zoom
-
+                has_lines = False
+                has_icons = False
+                has_fills = False
                 for st in zstyle:
-                    if st.get('-x-kot-layer') == 'top':
-                        st['z-index'] = float(st.get('z-index', 0)) + 15001.
-                    elif st.get('-x-kot-layer') == 'bottom':
-                        st['z-index'] = float(st.get('z-index', 0)) - 15001.
+                    st = dict([(k, v) for k, v in st.iteritems() if str(v).strip(" 0.")])
+                    if 'width' in st or 'pattern-image' in st:
+                        has_lines = True
+                    if 'icon-image' in st or 'symbol-shape' in st or 'symbol-image' in st:
+                        has_icons = True
+                    if 'fill-color' in st:
+                        has_fills = True
 
-                    if st.get('casing-width') not in (None, 0):  # and (st.get('width') or st.get('fill-color')):
-                        if st.get('casing-linecap', 'butt') == 'butt':
-                            dr_line = LineRuleProto()
-                            dr_line.width = (st.get('width', 0) * WIDTH_SCALE) + (st.get('casing-width') * WIDTH_SCALE * 2)
-                            dr_line.color = mwm_encode_color(st, "casing")
-                            dr_line.priority = min(int(st.get('z-index', 0) + 999), 20000)
-                            dashes = st.get('casing-dashes', st.get('dashes', []))
-                            dr_line.dashdot.dd.extend(dashes)
-                            dr_line.cap = dr_linecaps.get(st.get('casing-linecap', 'butt'), BUTTCAP)
-                            dr_line.join = dr_linejoins.get(st.get('casing-linejoin', 'round'), ROUNDJOIN)
-                            dr_element.lines.extend([dr_line])
+                has_text = None
+                txfmt = []
+                for st in zstyle:
+                    if st.get('text') and not st.get('text') in txfmt:
+                        txfmt.append(st.get('text'))
+                        if has_text is None:
+                            has_text = []
+                        has_text.append(st)
 
-                        # Let's try without this additional line style overhead. Needed only for casing in road endings.
-                        # if st.get('casing-linecap', st.get('linecap', 'round')) != 'butt':
-                        #     dr_line = LineRuleProto()
-                        #     dr_line.width = (st.get('width', 0) * WIDTH_SCALE) + (st.get('casing-width') * WIDTH_SCALE * 2)
-                        #     dr_line.color = mwm_encode_color(st, "casing")
-                        #     dr_line.priority = -15000
-                        #     dashes = st.get('casing-dashes', st.get('dashes', []))
-                        #     dr_line.dashdot.dd.extend(dashes)
-                        #     dr_line.cap = dr_linecaps.get(st.get('casing-linecap', 'round'), ROUNDCAP)
-                        #     dr_line.join = dr_linejoins.get(st.get('casing-linejoin', 'round'), ROUNDJOIN)
-                        #     dr_element.lines.extend([dr_line])
+                if has_lines or has_text or has_fills or has_icons:
+                    visstring[zoom] = "1"
+                    dr_element = DrawElementProto()
+                    dr_element.scale = zoom
 
-                    if has_lines:
-                        if st.get('width'):
-                            dr_line = LineRuleProto()
-                            dr_line.width = (st.get('width', 0) * WIDTH_SCALE)
-                            dr_line.color = mwm_encode_color(st)
-                            for i in st.get('dashes', []):
-                                dr_line.dashdot.dd.extend([max(float(i), 1) * WIDTH_SCALE])
-                            dr_line.cap = dr_linecaps.get(st.get('linecap', 'butt'), BUTTCAP)
-                            dr_line.join = dr_linejoins.get(st.get('linejoin', 'round'), ROUNDJOIN)
-                            dr_line.priority = min((int(st.get('z-index', 0)) + 1000), 20000)
-                            dr_element.lines.extend([dr_line])
-                        if st.get('pattern-image'):
-                            dr_line = LineRuleProto()
-                            dr_line.width = 0
-                            dr_line.color = 0
-                            icon = mwm_encode_image(st, prefix='pattern')
-                            dr_line.pathsym.name = icon[0]
-                            dr_line.pathsym.step = float(st.get('pattern-spacing', 0)) - 16
-                            dr_line.pathsym.offset = st.get('pattern-offset', 0)
-                            dr_line.priority = int(st.get('z-index', 0)) + 1000
-                            dr_element.lines.extend([dr_line])
-                            textures[icon[0]] = icon[1]
-                        if st.get('shield-font-size'):
-                            dr_element.shield.height = int(st.get('shield-font-size', 10))
-                            dr_element.shield.color = mwm_encode_color(st, "shield-text")
-                            if st.get('shield-text-halo-radius', 0) != 0:
-                                dr_element.shield.stroke_color = mwm_encode_color(st, "shield-text-halo", "white")
-                            dr_element.shield.priority = min(19100, (16000 + int(st.get('z-index', 0))))
+                    for st in zstyle:
+                        if st.get('-x-kot-layer') == 'top':
+                            st['z-index'] = float(st.get('z-index', 0)) + 15001.
+                        elif st.get('-x-kot-layer') == 'bottom':
+                            st['z-index'] = float(st.get('z-index', 0)) - 15001.
 
-                    if has_icons:
-                        if st.get('icon-image'):
-                            if not has_icons_for_areas:
-                                dr_element.symbol.apply_for_type = 1
-                            icon = mwm_encode_image(st)
-                            dr_element.symbol.name = icon[0]
-                            dr_element.symbol.priority = min(19100, (16000 + int(st.get('z-index', 0))))
-                            textures[icon[0]] = icon[1]
-                            has_icons = False
-                        if st.get('symbol-shape'):
-                            dr_element.circle.radius = float(st.get('symbol-size'))
-                            dr_element.circle.color = mwm_encode_color(st, 'symbol-fill')
-                            dr_element.circle.priority = min(19000, (14000 + int(st.get('z-index', 0))))
-                            has_icons = False
+                        if st.get('casing-width') not in (None, 0):  # and (st.get('width') or st.get('fill-color')):
+                            if st.get('casing-linecap', 'butt') == 'butt':
+                                dr_line = LineRuleProto()
+                                dr_line.width = (st.get('width', 0) * WIDTH_SCALE) + (st.get('casing-width') * WIDTH_SCALE * 2)
+                                dr_line.color = mwm_encode_color(st, "casing")
+                                dr_line.priority = min(int(st.get('z-index', 0) + 999), 20000)
+                                dashes = st.get('casing-dashes', st.get('dashes', []))
+                                dr_line.dashdot.dd.extend(dashes)
+                                dr_line.cap = dr_linecaps.get(st.get('casing-linecap', 'butt'), BUTTCAP)
+                                dr_line.join = dr_linejoins.get(st.get('casing-linejoin', 'round'), ROUNDJOIN)
+                                dr_element.lines.extend([dr_line])
 
-                    if has_text and st.get('text'):
-                        has_text = has_text[:2]
-                        has_text.reverse()
-                        dr_text = dr_element.path_text
-                        base_z = 15000
-                        if st.get('text-position', 'center') == 'line':
+                            # Let's try without this additional line style overhead. Needed only for casing in road endings.
+                            # if st.get('casing-linecap', st.get('linecap', 'round')) != 'butt':
+                            #     dr_line = LineRuleProto()
+                            #     dr_line.width = (st.get('width', 0) * WIDTH_SCALE) + (st.get('casing-width') * WIDTH_SCALE * 2)
+                            #     dr_line.color = mwm_encode_color(st, "casing")
+                            #     dr_line.priority = -15000
+                            #     dashes = st.get('casing-dashes', st.get('dashes', []))
+                            #     dr_line.dashdot.dd.extend(dashes)
+                            #     dr_line.cap = dr_linecaps.get(st.get('casing-linecap', 'round'), ROUNDCAP)
+                            #     dr_line.join = dr_linejoins.get(st.get('casing-linejoin', 'round'), ROUNDJOIN)
+                            #     dr_element.lines.extend([dr_line])
+
+                        if has_lines:
+                            if st.get('width'):
+                                dr_line = LineRuleProto()
+                                dr_line.width = (st.get('width', 0) * WIDTH_SCALE)
+                                dr_line.color = mwm_encode_color(st)
+                                for i in st.get('dashes', []):
+                                    dr_line.dashdot.dd.extend([max(float(i), 1) * WIDTH_SCALE])
+                                dr_line.cap = dr_linecaps.get(st.get('linecap', 'butt'), BUTTCAP)
+                                dr_line.join = dr_linejoins.get(st.get('linejoin', 'round'), ROUNDJOIN)
+                                dr_line.priority = min((int(st.get('z-index', 0)) + 1000), 20000)
+                                dr_element.lines.extend([dr_line])
+                            if st.get('pattern-image'):
+                                dr_line = LineRuleProto()
+                                dr_line.width = 0
+                                dr_line.color = 0
+                                icon = mwm_encode_image(st, prefix='pattern')
+                                dr_line.pathsym.name = icon[0]
+                                dr_line.pathsym.step = float(st.get('pattern-spacing', 0)) - 16
+                                dr_line.pathsym.offset = st.get('pattern-offset', 0)
+                                dr_line.priority = int(st.get('z-index', 0)) + 1000
+                                dr_element.lines.extend([dr_line])
+                                textures[icon[0]] = icon[1]
+                            if st.get('shield-font-size'):
+                                dr_element.shield.height = int(st.get('shield-font-size', 10))
+                                dr_element.shield.color = mwm_encode_color(st, "shield-text")
+                                if st.get('shield-text-halo-radius', 0) != 0:
+                                    dr_element.shield.stroke_color = mwm_encode_color(st, "shield-text-halo", "white")
+                                dr_element.shield.priority = min(19100, (16000 + int(st.get('z-index', 0))))
+
+                        if has_icons:
+                            if st.get('icon-image'):
+                                if not has_icons_for_areas:
+                                    dr_element.symbol.apply_for_type = 1
+                                icon = mwm_encode_image(st)
+                                dr_element.symbol.name = icon[0]
+                                dr_element.symbol.priority = min(19100, (16000 + int(st.get('z-index', 0))))
+                                textures[icon[0]] = icon[1]
+                                has_icons = False
+                            if st.get('symbol-shape'):
+                                dr_element.circle.radius = float(st.get('symbol-size'))
+                                dr_element.circle.color = mwm_encode_color(st, 'symbol-fill')
+                                dr_element.circle.priority = min(19000, (14000 + int(st.get('z-index', 0))))
+                                has_icons = False
+
+                        if has_text and st.get('text'):
+                            has_text = has_text[:2]
+                            has_text.reverse()
                             dr_text = dr_element.path_text
-                            base_z = 16000
-                        else:
-                            dr_text = dr_element.caption
-                        for sp in has_text[:]:
-                            dr_cur_subtext = dr_text.primary
-                            if len(has_text) == 2:
-                                dr_cur_subtext = dr_text.secondary
-                            dr_cur_subtext.height = int(float(sp.get('font-size', "10").split(",")[0]))
-                            dr_cur_subtext.color = mwm_encode_color(sp, "text")
-                            if st.get('text-halo-radius', 0) != 0:
-                                dr_cur_subtext.stroke_color = mwm_encode_color(sp, "text-halo", "white")
-                            if 'text-offset' in sp or 'text-offset-y' in sp:
-                                dr_cur_subtext.offset_y = int(sp.get('text-offset-y', sp.get('text-offset', 0)))
-                            if 'text-offset-x' in sp:
-                                dr_cur_subtext.offset_x = int(sp.get('text-offset-x', 0))
-                            has_text.pop()
-                        dr_text.priority = min(19000, (base_z + int(st.get('z-index', 0))))
-                        has_text = None
-
-                    if has_fills:
-                        if ('fill-color' in st) and (float(st.get('fill-opacity', 1)) > 0):
-                            dr_element.area.color = mwm_encode_color(st, "fill")
-                            if st.get('fill-position', 'foreground') == 'background':
-                                if 'z-index' not in st:
-                                    bgpos -= 1
-                                    dr_element.area.priority = bgpos - 16000
-                                else:
-                                    zzz = int(st.get('z-index', 0))
-                                    if zzz > 0:
-                                        dr_element.area.priority = zzz - 16000
-                                    else:
-                                        dr_element.area.priority = zzz - 16700
+                            base_z = 15000
+                            if st.get('text-position', 'center') == 'line':
+                                dr_text = dr_element.path_text
+                                base_z = 16000
                             else:
-                                dr_element.area.priority = (int(st.get('z-index', 0)) + 1 + 1000)
-                            has_fills = False
+                                dr_text = dr_element.caption
+                            for sp in has_text[:]:
+                                dr_cur_subtext = dr_text.primary
+                                if len(has_text) == 2:
+                                    dr_cur_subtext = dr_text.secondary
+                                dr_cur_subtext.height = int(float(sp.get('font-size', "10").split(",")[0]))
+                                dr_cur_subtext.color = mwm_encode_color(sp, "text")
+                                if st.get('text-halo-radius', 0) != 0:
+                                    dr_cur_subtext.stroke_color = mwm_encode_color(sp, "text-halo", "white")
+                                if 'text-offset' in sp or 'text-offset-y' in sp:
+                                    dr_cur_subtext.offset_y = int(sp.get('text-offset-y', sp.get('text-offset', 0)))
+                                if 'text-offset-x' in sp:
+                                    dr_cur_subtext.offset_x = int(sp.get('text-offset-x', 0))
+                                has_text.pop()
+                            dr_text.priority = min(19000, (base_z + int(st.get('z-index', 0))))
+                            has_text = None
 
-                dr_cont.element.extend([dr_element])
+                        if has_fills:
+                            if ('fill-color' in st) and (float(st.get('fill-opacity', 1)) > 0):
+                                dr_element.area.color = mwm_encode_color(st, "fill")
+                                if st.get('fill-position', 'foreground') == 'background':
+                                    if 'z-index' not in st:
+                                        bgpos -= 1
+                                        dr_element.area.priority = bgpos - 16000
+                                    else:
+                                        zzz = int(st.get('z-index', 0))
+                                        if zzz > 0:
+                                            dr_element.area.priority = zzz - 16000
+                                        else:
+                                            dr_element.area.priority = zzz - 16700
+                                else:
+                                    dr_element.area.priority = (int(st.get('z-index', 0)) + 1 + 1000)
+                                has_fills = False
 
-        if dr_cont.element:
-            drules.cont.extend([dr_cont])
+                    if apply_if:
+                        dr_element.apply_if = apply_if
 
-        # atdrcont.Stop()
+                    dr_cont.element.extend([dr_element])
 
-        visibility["world|" + class_tree[cl] + "|"] = "".join(visstring)
+            if dr_cont.element:
+                drules.cont.extend([dr_cont])
 
-    # atwrite = AccumulativeTimer()
-    # atwrite.Start()
+            # atdrcont.Stop()
+
+            visibility["world|" + class_tree[cl] + "|"] = "".join(visstring)
+
+        # atwrite = AccumulativeTimer()
+        # atwrite.Start()
 
     drules_bin.write(drules.SerializeToString())
     drules_txt.write(unicode(drules))
