@@ -321,7 +321,8 @@ namespace
     RulesHolder & m_holder;
 
     template <class TRule, class TProtoRule>
-    void AddRule(ClassifObject * p, int scale, rule_type_t type, TProtoRule const & rule)
+    void AddRule(ClassifObject * p, int scale, rule_type_t type, TProtoRule const & rule,
+                 string const & apply_if)
     {
       Key k = m_holder.AddRule(scale, type, new TRule(rule));
       p->SetVisibilityOnScale(true, scale);
@@ -347,26 +348,30 @@ namespace
 
           using namespace proto_rules;
 
+          string apply_if;
+          if (de.has_apply_if())
+            apply_if = de.apply_if();
+
           for (int k = 0; k < de.lines_size(); ++k)
-            AddRule<Line>(p, de.scale(), line, de.lines(k));
+            AddRule<Line>(p, de.scale(), line, de.lines(k), apply_if);
 
           if (de.has_area())
-            AddRule<Area>(p, de.scale(), area, de.area());
+            AddRule<Area>(p, de.scale(), area, de.area(), apply_if);
 
           if (de.has_symbol())
-            AddRule<Symbol>(p, de.scale(), symbol, de.symbol());
+            AddRule<Symbol>(p, de.scale(), symbol, de.symbol(), apply_if);
 
           if (de.has_caption())
-            AddRule<Caption>(p, de.scale(), caption, de.caption());
+            AddRule<Caption>(p, de.scale(), caption, de.caption(), apply_if);
 
           if (de.has_circle())
-            AddRule<Circle>(p, de.scale(), circle, de.circle());
+            AddRule<Circle>(p, de.scale(), circle, de.circle(), apply_if);
 
           if (de.has_path_text())
-            AddRule<PathText>(p, de.scale(), pathtext, de.path_text());
+            AddRule<PathText>(p, de.scale(), pathtext, de.path_text(), apply_if);
 
           if (de.has_shield())
-            AddRule<Shield>(p, de.scale(), shield, de.shield());
+            AddRule<Shield>(p, de.scale(), shield, de.shield(), apply_if);
         }
       }
 
