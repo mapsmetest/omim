@@ -5,7 +5,6 @@ from optparse import OptionParser
 import os
 import csv
 import sys
-import json
 import mapcss.webcolors
 whatever_to_hex = mapcss.webcolors.webcolors.whatever_to_hex
 whatever_to_cairo = mapcss.webcolors.webcolors.whatever_to_cairo
@@ -347,8 +346,8 @@ def komap_mapswithme(options, style, filename):
 
             visibility["world|" + class_tree[cl] + "|"] = "".join(visstring)
 
-        # atwrite = AccumulativeTimer()
-        # atwrite.Start()
+    # atwrite = AccumulativeTimer()
+    # atwrite.Start()
 
     drules_bin.write(drules.SerializeToString())
     drules_txt.write(unicode(drules))

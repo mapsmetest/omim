@@ -87,7 +87,6 @@ class StyleChooser:
         self.selzooms = None
         self.compatible_types = set()
         self.has_evals = False
-        self.apply_if = None
 
     def extract_tags(self):
         a = set()
@@ -107,7 +106,7 @@ class StyleChooser:
             a.add("*")
         return a
 
-    def updateStyles(self, sl, ftype, tags, zoom, scale, zscale):
+    def updateStyles(self, sl, ftype, tags, zoom, scale, zscale, apply_if):
         # Are any of the ruleChains fulfilled?
         if self.selzooms:
             if zoom < self.selzooms[0] or zoom > self.selzooms[1]:
@@ -116,7 +115,7 @@ class StyleChooser:
         #if ftype not in self.compatible_types:
 #            return sl
 
-        object_id = self.testChain(self.ruleChains, ftype, tags, zoom)
+        object_id = self.testChain(self.ruleChains, ftype, tags, zoom, apply_if)
 
         if not object_id:
             return sl
@@ -165,14 +164,15 @@ class StyleChooser:
 
         return sl
 
-    def testChain(self, chain, obj, tags, zoom):
+    def testChain(self, chain, obj, tags, zoom, apply_if):
         """
         Tests an object against a chain
         """
         for r in chain:
-            tt = r.test(obj, tags, zoom)
-            if tt:
-                return tt
+            if r.apply_if == apply_if:
+                tt = r.test(obj, tags, zoom)
+                if tt:
+                    return tt
         return False
 
     def newGroup(self):
@@ -208,11 +208,11 @@ class StyleChooser:
         self.ruleChains[-1].conditions.append(c)
 
     def setApplyIf(self, a):
-        # print "applyIf='%s'" % (a)
+        # print "apply_if='%s'" % (a)
         """
-        sets apply_if condition to the StyleChooser
+        sets apply_if condition to the current RuleChain
         """
-        self.apply_if = a
+        self.ruleChains[-1].apply_if = a
 
     def addStyles(self, a):
         # print "addStyle ", a

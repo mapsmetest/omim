@@ -136,7 +136,7 @@ class MapCSS():
                     tmp.append(ec)
             self.choosers_by_type_and_tag[type][tag] = tmp
 
-    def get_style(self, clname, type, tags={}, zoom=0, scale=1, zscale=.5, apply_if=None):
+    def get_style(self, clname, type, tags, zoom, scale, zscale, apply_if):
         """
         Kothic styling API
         """
@@ -144,8 +144,7 @@ class MapCSS():
         if type in self.choosers_by_type_and_tag:
             choosers = self.choosers_by_type_and_tag[type][clname]
             for chooser in choosers:
-                if apply_if == chooser.apply_if:
-                    style = chooser.updateStyles(style, type, tags, zoom, scale, zscale)
+                style = chooser.updateStyles(style, type, tags, zoom, scale, zscale, apply_if)
         style = [x for x in style if x["object-id"] != "::*"]
         for x in style:
             for k, v in [('width', 0), ('casing-width', 0)]:
@@ -244,8 +243,8 @@ class MapCSS():
 
                     # ApplyIfCondition - [apply_if=...]
                     elif APPLY_IF_CONDITION.match(css):
-                        if (previous != oGROUP):
-                            raise Exception("',' is expected before an apply_if")
+                        if (previous != oCONDITION):
+                            raise Exception("CONDITION (like [nature=land]) is expected before an APPLY_IF")
                         cond = APPLY_IF_CONDITION.match(css).groups()[0]
                         log.debug("apply_if condition found: %s" % (cond))
                         css = APPLY_IF_CONDITION.sub("", css)
@@ -254,6 +253,8 @@ class MapCSS():
 
                     # Condition - [highway=primary]
                     elif CONDITION.match(css):
+                        if (previous == oAPPLY_IF_CONDITION):
+                            raise Exception("APPLY_IF must be specified after all CONDITION sections")
                         if (previous == oDECLARATION):
                             self.choosers.append(sc)
                             sc = StyleChooser(self.scalepair)
@@ -358,8 +359,9 @@ class MapCSS():
             pass
 
         for chooser in self.choosers:
-            if chooser.apply_if not in self.apply_ifs:
-                self.apply_ifs.append(chooser.apply_if)
+            for r in chooser.ruleChains:
+                if r.apply_if not in self.apply_ifs:
+                    self.apply_ifs.append(r.apply_if)
             for t in chooser.compatible_types:
                 if t not in self.choosers_by_type:
                     self.choosers_by_type[t] = [chooser]

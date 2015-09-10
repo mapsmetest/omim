@@ -32,6 +32,7 @@ class Rule():
         if s == "*":
             s = ""
         self.subject = s    # "", "way", "node" or "relation"
+        self.apply_if = None
 
     def __repr__(self):
         return "%s|z%s-%s %s" % (self.subject, self.minZoom, self.maxZoom, self.conditions)
