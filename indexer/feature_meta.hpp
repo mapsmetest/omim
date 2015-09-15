@@ -34,6 +34,7 @@ namespace feature
       FMD_TURN_LANES_BACKWARD = 13,
       FMD_EMAIL = 14,
       FMD_POSTCODE = 15,
+      FMD_MAXSPEED = 16,
       FMD_COUNT
     };
 
