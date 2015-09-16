@@ -27,6 +27,7 @@ SOURCES += \
     osm_id.cpp \
     osm_source.cpp \
     routing_generator.cpp \
+    speedcam_generator.cpp \
     statistics.cpp \
     tesselator.cpp \
     unpack_mwm.cpp \
@@ -57,6 +58,7 @@ HEADERS += \
     osm_xml_source.hpp \
     polygonizer.hpp \
     routing_generator.hpp \
+    speedcam_generator.hpp \
     statistics.hpp \
     tesselator.hpp \
     unpack_mwm.hpp \

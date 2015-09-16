@@ -1,3 +1,5 @@
+#include "speedcam_generator.hpp"
+
 #include "generator/routing_generator.hpp"
 
 #include "generator/borders_generator.hpp"
@@ -9,6 +11,7 @@
 #include "routing/osrm_engine.hpp"
 #include "routing/cross_routing_context.hpp"
 
+#include "indexer/classificator.hpp"
 #include "indexer/classificator_loader.hpp"
 #include "indexer/data_header.hpp"
 #include "indexer/feature.hpp"
@@ -245,6 +248,8 @@ void BuildRoutingIndex(string const & baseDir, string const & countryName, strin
   gen::OsmID2FeatureID osm2ft;
   if (!LoadIndexes(localFile.GetPath(MapOptions::Map), osrmFile, nodeData, osm2ft))
     return;
+
+  SpeedCameraIndexBuilder cameraBuilder(index);
 
   OsrmFtSegMappingBuilder mapping;
 
