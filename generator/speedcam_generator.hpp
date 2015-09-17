@@ -5,6 +5,8 @@
 #include "geometry/point2d.hpp"
 
 class Index;
+class FeatureType;
+class FileWriter;
 
 namespace routing
 {
@@ -15,6 +17,8 @@ struct SpeedCamera
   uint32_t camFID;
   uint32_t roadFID;
   uint16_t pointOffset;
+
+  SpeedCamera(uint32_t cFID, uint32_t rFID, uint16_t offset) : camFID(cFID), roadFID(rFID), pointOffset(offset) {}
 };
 
 class SpeedCameraIndexBuilder
@@ -27,9 +31,14 @@ class SpeedCameraIndexBuilder
   };
 
   vector<SpeedCameraFeature> m_cameras;
+  vector<SpeedCamera> m_result;
+  set<uint32_t> m_checkedFIDs;
 
 public:
   SpeedCameraIndexBuilder(Index & index);
+
+  void AddVehicleFeature(FeatureType const & ft);
+  void Serialize(FileWriter & writer);
 };
 
 }  // namespace routing

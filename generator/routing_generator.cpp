@@ -281,6 +281,7 @@ void BuildRoutingIndex(string const & baseDir, string const & countryName, strin
       loader.GetFeatureByIndex(fID, ft);
 
       ft.ParseGeometry(FeatureType::BEST_GEOMETRY);
+      cameraBuilder.AddVehicleFeature(ft);
 
       typedef pair<int, double> IndexT;
       vector<IndexT> indices[2];
@@ -429,6 +430,11 @@ void BuildRoutingIndex(string const & baseDir, string const & countryName, strin
   appendFile(ROUTING_EDGEDATA_FILE_TAG);
   appendFile(ROUTING_MATRIX_FILE_TAG);
   appendFile(ROUTING_EDGEID_FILE_TAG);
+
+  {
+    FileWriter w = routingCont.GetWriter(ROUTING_SPEED_CAMERA_FILE_TAG);
+    cameraBuilder.Serialize(w);
+  }
 
   routingCont.Finish();
 
