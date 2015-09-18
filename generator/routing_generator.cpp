@@ -1,5 +1,3 @@
-#include "speedcam_generator.hpp"
-
 #include "generator/routing_generator.hpp"
 
 #include "generator/borders_generator.hpp"
@@ -10,6 +8,7 @@
 #include "routing/osrm_data_facade.hpp"
 #include "routing/osrm_engine.hpp"
 #include "routing/cross_routing_context.hpp"
+#include "routing/speed_camera.hpp"
 
 #include "indexer/classificator.hpp"
 #include "indexer/classificator_loader.hpp"

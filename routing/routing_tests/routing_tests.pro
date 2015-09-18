@@ -34,6 +34,7 @@ SOURCES += \
   road_graph_nearest_edges_test.cpp \
   route_tests.cpp \
   routing_mapping_test.cpp \
+  speed_camera_test.cpp \
   turns_generator_test.cpp \
   turns_sound_test.cpp \
   turns_tts_text_tests.cpp \

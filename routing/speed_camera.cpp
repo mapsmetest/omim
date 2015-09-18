@@ -1,11 +1,13 @@
-#include "speedcam_generator.hpp"
-
-#include "coding/file_writer.hpp"
+#include "speed_camera.hpp"
 
 #include "indexer/classificator.hpp"
 #include "indexer/ftypes_matcher.hpp"
 #include "indexer/index.hpp"
 #include "indexer/scales.hpp"
+
+#include "coding/reader.hpp"
+#include "coding/writer.hpp"
+#include "coding/read_write_utils.hpp"
 
 namespace routing
 {
@@ -59,12 +61,11 @@ void SpeedCameraIndexBuilder::AddVehicleFeature(FeatureType const & ft)
   }
 }
 
-void SpeedCameraIndexBuilder::Serialize(FileWriter & writer)
+void SpeedCameraIndexBuilder::Serialize(Writer & writer)
 {
-  WriteVarUint(writer, m_result.size());
-  for (auto const & cam : m_result)
-    writer.Write(&cam, sizeof(cam));
-  writer.WritePaddingByEnd(4);
-  LOG(LINFO, ("Write ", m_result.size(), "speed camera records."));
+  uint32_t const size = static_cast<uint32_t>(m_result.size());
+  WriteVarUint(writer, size);
+  writer.Write(&m_result[0], size * sizeof(SpeedCamera));
+  LOG(LINFO, ("Write ", size, "speed camera records."));
 }
-}  // namespace routing
+}  // namesoace routing
