@@ -19,6 +19,7 @@ import re
 
 # Fast conditions
 
+"""
 class EqConditionDD:
     def __init__(self, params):
         self.value = params[1]
@@ -90,6 +91,7 @@ class UntrueCondition:
         if self.tag in tags:
             return tags[self.tag] == 'no'
         return False
+"""
 
 # Slow condition
 
@@ -148,6 +150,32 @@ class Condition:
         return False
 
     def __repr__(self):
+        t = self.type
+        params = self.params
+        if t == 'eq' and params[0][:2] == "::":
+            return "::%s" % (params[1])
+        if t == 'eq':
+            return "%s=%s" % (params[0], params[1])
+        if t == 'ne':
+            return "%s=%s" % (params[0], params[1])
+        if t == 'regex':
+            return "%s=~/%s/" % (params[0], params[1]);
+        if t == 'true':
+            return "%s" % (params[0])
+        if t == 'untrue':
+            return "!%s" % (params[0])
+        if t == 'set':
+            return "%s" % (params[0])
+        if t == 'unset':
+            return "!%s" % (params[0])
+        if t == '<':
+            return "%s<%s" % (params[0], params[1])
+        if t == '<=':
+            return "%s<=%s" % (params[0], params[1])
+        if t == '>':
+            return "%s>%s" % (params[0], params[1])
+        if t == '>=':
+            return "%s>=%s" % (params[0], params[1])
         return "%s %s " % (self.type, repr(self.params))
 
     def __eq__(self, a):
@@ -164,6 +192,7 @@ def Number(tt):
 
 # Some conditions we can optimize by using "python polymorthism"
 
+"""
 def OptimizeCondition(condition):
     if (condition.type == "eq"):
         if (condition.params[0][:2] == "::"):
@@ -182,3 +211,4 @@ def OptimizeCondition(condition):
         return UntrueCondition(condition.params)
     else:
         return condition
+"""
