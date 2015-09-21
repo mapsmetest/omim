@@ -88,6 +88,7 @@ public:
   double GetMercatorDistanceFromBegin() const;
 
   void GetCurrentTurn(double & distanceToTurnMeters, turns::TurnItem & turn) const;
+  double GetCurrentCam(SpeedCameraRestriction & camera) const;
   /// @return true if GetNextTurn() returns a valid result in parameters, false otherwise.
   /// \param distanceToTurnMeters is a distance from current possition to the second turn.
   /// \param turn is information about the second turn.

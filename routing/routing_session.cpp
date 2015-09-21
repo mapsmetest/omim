@@ -31,6 +31,10 @@ double constexpr kMaxTurnDistM = 400.;
 // @todo(kshalnev) The distance may depend on the current speed.
 double constexpr kShowPedestrianTurnInMeters = 5.;
 
+// Distance to speed camera to make sound bell on overspeed.
+double constexpr kSpeedCameraWarningMeters = 100.;
+
+double constexpr kMpsToKmh = 1000. / 3600.;
 }  // namespace
 
 namespace routing
@@ -41,6 +45,7 @@ RoutingSession::RoutingSession()
       m_route(string()),
       m_state(RoutingNotActive),
       m_endPoint(m2::PointD::Zero()),
+      m_speedMpS(0),
       m_passedDistanceOnRouteMeters(0.0)
 {
 }
@@ -143,6 +148,7 @@ RoutingSession::State RoutingSession::OnLocationPositionChanged(m2::PointD const
   ASSERT(m_route.IsValid(), ());
 
   m_turnsSound.SetSpeedMetersPerSecond(info.m_speed);
+  m_speedMpS = info.m_speed;
 
   if (m_route.MoveIterator(info))
   {
@@ -204,6 +210,7 @@ void RoutingSession::GetRouteFollowingInfo(FollowingInfo & info) const
   threads::MutexGuard guard(m_routeSessionMutex);
   UNUSED_VALUE(guard);
 
+  // TODO (ldragunov) Refactor this.
   if (m_route.IsValid() && IsNavigable())
   {
     formatDistFn(m_route.GetCurrentDistanceToEndMeters(), info.m_distToTarget, info.m_targetUnitsSuffix);
@@ -257,6 +264,15 @@ void RoutingSession::GetRouteFollowingInfo(FollowingInfo & info) const
     else
     {
       info.m_lanes.clear();
+    }
+
+    // Warning signals checks
+    SpeedCameraRestriction cam(0, 0);
+    double const camDistance = m_route.GetCurrentCam(cam);
+    if (camDistance < kSpeedCameraWarningMeters)
+    {
+      if (m_speedMpS > cam.m_maxSpeed * kMpsToKmh)
+        info.m_speedWarningSignal = true;
     }
 
     // Pedestrian info

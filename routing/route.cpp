@@ -148,6 +148,22 @@ Route::TTurns::const_iterator Route::GetCurrentTurn() const
          });
 }
 
+double Route::GetCurrentCam(SpeedCameraRestriction & camera) const
+{
+  if (m_cameras.empty())
+    return 0;
+  SpeedCameraRestriction cam(static_cast<uint32_t>(m_poly.GetCurrentIter().m_ind), 0 /* maxspeed */);
+  auto it = upper_bound(m_cameras.cbegin(), m_cameras.cend(), cam,
+      [](SpeedCameraRestriction const & lhs, SpeedCameraRestriction const & rhs)
+      {
+        return lhs.m_index < rhs.m_index;
+      });
+  if (it == m_cameras.end())
+    return 0;
+  camera = *it;
+  return m_poly.GetDistanceM(m_poly.GetCurrentIter(), m_poly.GetIterToIndex(camera.m_index));
+}
+
 void Route::GetCurrentTurn(double & distanceToTurnMeters, turns::TurnItem & turn) const
 {
   auto it = GetCurrentTurn();
