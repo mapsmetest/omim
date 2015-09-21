@@ -11,6 +11,14 @@
 
 #include "base/string_utils.hpp"
 
+namespace
+{
+auto RoadCameraComparator = [](routing::SpeedCamera const & lhs, routing::SpeedCamera const & rhs)
+      {
+        return lhs.roadFID < rhs.roadFID;
+      };
+}  // namespace
+
 namespace routing
 {
 uint8_t ReadCamRestriction(FeatureType & ft)
@@ -78,6 +86,7 @@ void SpeedCameraIndexBuilder::AddVehicleFeature(FeatureType const & ft)
 
 void SpeedCameraIndexBuilder::Serialize(Writer & writer)
 {
+  sort(m_result.begin(), m_result.end(), RoadCameraComparator);
   uint32_t const size = static_cast<uint32_t>(m_result.size());
   WriteVarUint(writer, size);
   writer.Write(&m_result[0], size * sizeof(SpeedCamera));
@@ -86,9 +95,10 @@ void SpeedCameraIndexBuilder::Serialize(Writer & writer)
 
 void SpeedCameraIndex::GetCamerasByFID(uint32_t fid, vector<SpeedCamera> & cameras) const
 {
-  //TODO (ldragunov) Rewrite to half division find
-  for (auto const & cam : m_cameras)
-    if (cam.roadFID == fid)
-      cameras.push_back(cam);
+  cameras.clear();
+  SpeedCamera cam(0 /* camFID */, fid /* roadFID */, 0 /* offset */);
+  auto it = lower_bound(m_cameras.begin(), m_cameras.end(), cam, RoadCameraComparator);
+  while (it != m_cameras.end() && it->roadFID == fid)
+    cameras.push_back(*it++);
 }
 }  // namesoace routing

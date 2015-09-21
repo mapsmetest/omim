@@ -68,6 +68,8 @@ class SpeedCameraIndexBuilder
   set<uint32_t> m_checkedFIDs;
 
   friend void UnitTest_SpeedCameraSerializationTest();
+  friend void UnitTest_SpeedCameraSortTest();
+  friend void UnitTest_SpeedCameraGetCameraByFIDTest();
 
 public:
   SpeedCameraIndexBuilder(Index & index);
