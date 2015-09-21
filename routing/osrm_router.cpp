@@ -469,6 +469,7 @@ OsrmRouter::ResultCode OsrmRouter::MakeRouteFromCrossesPath(TCheckedPath const &
 {
   Route::TTurns TurnsDir;
   Route::TTimes Times;
+  Route::TCameras Cameras;
   vector<m2::PointD> Points;
   for (RoutePathCross cross : path)
   {
@@ -494,8 +495,9 @@ OsrmRouter::ResultCode OsrmRouter::MakeRouteFromCrossesPath(TCheckedPath const &
     // Get annotated route.
     Route::TTurns mwmTurnsDir;
     Route::TTimes mwmTimes;
+    Route::TCameras mwmCameras;
     vector<m2::PointD> mwmPoints;
-    MakeTurnAnnotation(routingResult, mwmMapping, delegate, mwmPoints, mwmTurnsDir, mwmTimes);
+    MakeTurnAnnotation(routingResult, mwmMapping, delegate, mwmPoints, mwmTurnsDir, mwmTimes, mwmCameras);
     // Connect annotated route.
     const uint32_t pSize = Points.size();
     for (auto turn : mwmTurnsDir)
@@ -504,6 +506,14 @@ OsrmRouter::ResultCode OsrmRouter::MakeRouteFromCrossesPath(TCheckedPath const &
         continue;
       turn.m_index += pSize;
       TurnsDir.push_back(turn);
+    }
+
+    for (auto camera : mwmCameras)
+    {
+      if (camera.m_index == 0)
+        continue;
+      camera.m_index += pSize;
+      Cameras.push_back(camera);
     }
 
     double const estimationTime = Times.size() ? Times.back().second : 0.0;
@@ -522,6 +532,7 @@ OsrmRouter::ResultCode OsrmRouter::MakeRouteFromCrossesPath(TCheckedPath const &
   route.SetGeometry(Points.begin(), Points.end());
   route.SetTurnInstructions(TurnsDir);
   route.SetSectionTimes(Times);
+  route.SetCameras(Cameras);
   return OsrmRouter::NoError;
 }
 
@@ -615,13 +626,15 @@ OsrmRouter::ResultCode OsrmRouter::CalculateRoute(m2::PointD const & startPoint,
 
     Route::TTurns turnsDir;
     Route::TTimes times;
+    Route::TCameras cameras;
     vector<m2::PointD> points;
 
-    MakeTurnAnnotation(routingResult, startMapping, delegate, points, turnsDir, times);
+    MakeTurnAnnotation(routingResult, startMapping, delegate, points, turnsDir, times, cameras);
 
     route.SetGeometry(points.begin(), points.end());
     route.SetTurnInstructions(turnsDir);
     route.SetSectionTimes(times);
+    route.SetCameras(cameras);
 
     return NoError;
   }
@@ -681,9 +694,10 @@ IRouter::ResultCode OsrmRouter::FindPhantomNodes(m2::PointD const & point,
 OsrmRouter::ResultCode OsrmRouter::MakeTurnAnnotation(
     RawRoutingResult const & routingResult, TRoutingMappingPtr const & mapping,
     RouterDelegate const & delegate, vector<m2::PointD> & points, Route::TTurns & turnsDir,
-    Route::TTimes & times)
+    Route::TTimes & times, Route::TCameras & cameras)
 {
   ASSERT(mapping, ());
+  mapping->LoadSpeedCameras();
 
   typedef OsrmMappingTypes::FtSeg TSeg;
   TSeg const & segBegin = routingResult.sourceEdge.segment;
@@ -778,10 +792,13 @@ OsrmRouter::ResultCode OsrmRouter::MakeTurnAnnotation(
       {
         TSeg const & seg = buffer[k];
 
+        vector<routing::SpeedCamera> candidateCams;
+
         FeatureType ft;
         Index::FeaturesLoaderGuard loader(*m_pIndex, mapping->GetMwmId());
         loader.GetFeatureByIndex(seg.m_fid, ft);
         ft.ParseGeometry(FeatureType::BEST_GEOMETRY);
+        mapping->m_speedCamerasIndex.GetCamerasByFID(seg.m_fid, candidateCams);
 
         auto startIdx = seg.m_pointStart;
         auto endIdx = seg.m_pointEnd;
@@ -796,6 +813,14 @@ OsrmRouter::ResultCode OsrmRouter::MakeTurnAnnotation(
         {
           for (auto idx = startIdx; idx <= endIdx; ++idx)
           {
+            for (auto const & cam : candidateCams)
+            {
+              if (cam.pointOffset == idx)
+              {
+                //TODO (ldragunov) think about this place. It smells bad.
+                cameras.emplace_back(idx, ReadCamRestriction(ft));
+              }
+            }
             points.push_back(ft.GetPoint(idx));
             if (needTime && idx > startIdx)
               estimatedTime += MercatorBounds::DistanceOnEarth(ft.GetPoint(idx - 1), ft.GetPoint(idx)) / carModel.GetSpeed(ft);
@@ -808,6 +833,13 @@ OsrmRouter::ResultCode OsrmRouter::MakeTurnAnnotation(
             if (needTime)
               estimatedTime += MercatorBounds::DistanceOnEarth(ft.GetPoint(idx - 1), ft.GetPoint(idx)) / carModel.GetSpeed(ft);
             points.push_back(ft.GetPoint(idx));
+            for (auto const & cam : candidateCams)
+            {
+              if (cam.pointOffset == idx)
+              {
+                cameras.emplace_back(idx, ReadCamRestriction(ft));
+              }
+            }
           }
           points.push_back(ft.GetPoint(endIdx));
         }

@@ -20,12 +20,22 @@ namespace location
 namespace routing
 {
 
+/// Speed cameras structure. First is reference to point, second is a speed limit.
+struct SpeedCameraRestriction
+{
+  uint32_t m_index;
+  uint8_t m_maxSpeed;
+
+  SpeedCameraRestriction(uint32_t index, uint8_t maxSpeed) : m_index(index), m_maxSpeed(maxSpeed) {}
+};
+
 class Route
 {
 public:
   typedef vector<turns::TurnItem> TTurns;
   typedef pair<uint32_t, double> TTimeItem;
   typedef vector<TTimeItem> TTimes;
+  typedef vector<SpeedCameraRestriction> TCameras;
 
   explicit Route(string const & router)
     : m_router(router), m_routingSettings(GetCarRoutingSettings()) {}
@@ -50,6 +60,11 @@ public:
   inline void SetTurnInstructions(TTurns & v)
   {
     swap(m_turns, v);
+  }
+
+  inline void SetCameras(TCameras & v)
+  {
+    swap(m_cameras, v);
   }
 
   inline void SetSectionTimes(TTimes & v)
@@ -122,6 +137,7 @@ private:
 
   TTurns m_turns;
   TTimes m_times;
+  TCameras m_cameras;
 
   mutable double m_currentTime;
 };

@@ -3,6 +3,7 @@
 #include "osrm2feature_map.hpp"
 #include "osrm_data_facade.hpp"
 #include "router.hpp"
+#include "speed_camera.hpp"
 
 #include "indexer/index.hpp"
 
@@ -22,6 +23,7 @@ struct RoutingMapping
   TDataFacade m_dataFacade;
   OsrmFtSegMapping m_segMapping;
   CrossRoutingContextReader m_crossContext;
+  SpeedCameraIndex m_speedCamerasIndex;
 
   /// Default constructor to create invalid instance for existing client code.
   /// @postcondition IsValid() == false.
@@ -38,6 +40,8 @@ struct RoutingMapping
 
   void LoadCrossContext();
   void FreeCrossContext();
+
+  void LoadSpeedCameras();
 
   bool IsValid() const { return m_handle.IsAlive() && m_error == IRouter::ResultCode::NoError; }
 

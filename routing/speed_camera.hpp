@@ -18,6 +18,8 @@ class FeatureType;
 namespace routing
 {
 
+uint8_t ReadCamRestriction(FeatureType & ft);
+
 /// Speed camera road record. Contains the identifier of the camera feature, and the road feature
 /// identifier with geomety offset.
 struct SpeedCamera
@@ -34,18 +36,22 @@ class SpeedCameraIndex
 {
   vector<SpeedCamera> m_cameras;
 public:
+  SpeedCameraIndex() = default;
+
   template<class TSink>
-  SpeedCameraIndex(TSink model)
-{
-  ReaderSource<TSink> src(model);
-  uint32_t count = ReadVarUint<uint32_t>(src);
-  if (!count)
-    return;
-  m_cameras.resize(count);
-  src.Read(&m_cameras[0], sizeof(SpeedCamera)*count);
-}
+  void Load(TSink model)
+  {
+    ReaderSource<TSink> src(model);
+    uint32_t count = ReadVarUint<uint32_t>(src);
+    if (!count)
+      return;
+    m_cameras.resize(count);
+    src.Read(&m_cameras[0], sizeof(SpeedCamera)*count);
+  }
 
   vector<SpeedCamera> const & GetCameras() const { return m_cameras; }
+
+  void GetCamerasByFID(uint32_t fid, vector<SpeedCamera> & cameras) const;
 };
 
 class SpeedCameraIndexBuilder

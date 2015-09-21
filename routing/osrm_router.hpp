@@ -81,12 +81,14 @@ protected:
    * \param points Storage for unpacked points of the path.
    * \param turnsDir output turns annotation storage.
    * \param times output times annotation storage.
+   * \param cameras output speed cameras annotation storage.
    * \return routing operation result code.
    */
   ResultCode MakeTurnAnnotation(RawRoutingResult const & routingResult,
                                 TRoutingMappingPtr const & mapping,
                                 RouterDelegate const & delegate, vector<m2::PointD> & points,
-                                Route::TTurns & turnsDir, Route::TTimes & times);
+                                Route::TTurns & turnsDir, Route::TTimes & times,
+                                Route::TCameras & cameras);
 
 private:
   /*!

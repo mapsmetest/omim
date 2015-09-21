@@ -137,6 +137,13 @@ void RoutingMapping::FreeCrossContext()
   m_crossContext = CrossRoutingContextReader();
 }
 
+void RoutingMapping::LoadSpeedCameras()
+{
+  if (!m_container.IsExist(ROUTING_SPEED_CAMERA_FILE_TAG))
+    return;
+  m_speedCamerasIndex.Load(m_container.GetReader(ROUTING_SPEED_CAMERA_FILE_TAG));
+}
+
 TRoutingMappingPtr RoutingIndexManager::GetMappingByPoint(m2::PointD const & point)
 {
   string const name = m_countryFileFn(point);

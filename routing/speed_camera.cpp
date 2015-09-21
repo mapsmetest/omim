@@ -9,8 +9,23 @@
 #include "coding/writer.hpp"
 #include "coding/read_write_utils.hpp"
 
+#include "base/string_utils.hpp"
+
 namespace routing
 {
+uint8_t ReadCamRestriction(FeatureType & ft)
+{
+  using feature::Metadata;
+  ft.ParseMetadata();
+  feature::Metadata const & mt = ft.GetMetadata();
+  string const & speed = mt.Get(Metadata::FMD_MAXSPEED);
+  if (!speed.length())
+    return 0;
+  int result;
+  strings::to_int(speed, result);
+  return result;
+}
+
 SpeedCameraIndexBuilder::SpeedCameraIndexBuilder(Index & index)
 {
   Classificator & c = classif();
@@ -67,5 +82,13 @@ void SpeedCameraIndexBuilder::Serialize(Writer & writer)
   WriteVarUint(writer, size);
   writer.Write(&m_result[0], size * sizeof(SpeedCamera));
   LOG(LINFO, ("Write ", size, "speed camera records."));
+}
+
+void SpeedCameraIndex::GetCamerasByFID(uint32_t fid, vector<SpeedCamera> & cameras) const
+{
+  //TODO (ldragunov) Rewrite to half division find
+  for (auto const & cam : m_cameras)
+    if (cam.roadFID == fid)
+      cameras.push_back(cam);
 }
 }  // namesoace routing
