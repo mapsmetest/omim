@@ -37,6 +37,8 @@ public:
   typedef vector<TTimeItem> TTimes;
   typedef vector<SpeedCameraRestriction> TCameras;
 
+  static double constexpr kInvalidSpeedCameraDistance = -1;
+
   explicit Route(string const & router)
     : m_router(router), m_routingSettings(GetCarRoutingSettings()) {}
 

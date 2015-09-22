@@ -99,4 +99,4 @@ void SpeedCameraIndex::GetCamerasByFID(uint32_t fid, vector<SpeedCamera> & camer
   while (it != m_cameras.end() && it->roadFID == fid)
     cameras.push_back(*it++);
 }
-}  // namesoace routing
+}  // namespace routing

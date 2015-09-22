@@ -19,7 +19,6 @@ class FeatureType;
 
 namespace routing
 {
-
 uint8_t ReadCamRestriction(FeatureType & ft);
 
 /// Speed camera road record. Contains the identifier of the camera feature, and the road feature
@@ -87,4 +86,4 @@ public:
   void AddVehicleFeature(FeatureType const & ft);
   void Serialize(Writer & writer);
 };
-}
+}  // namespace routing
