@@ -125,6 +125,7 @@ private:
   State m_state;
   m2::PointD m_endPoint;
   double m_speedMpS;
+  mutable size_t m_lastWarnedSpeedCamera;
 
   mutable threads::Mutex m_routeSessionMutex;
 

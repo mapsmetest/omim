@@ -44,7 +44,7 @@ SpeedCameraIndexBuilder::SpeedCameraIndexBuilder(Index & index)
     if (ft.GetFeatureType() != feature::GEOM_POINT)
       return;
 
-    feature::TypesHolder hl = ft;  // feature::TypesHolder(ft.GetFeatureType());
+    feature::TypesHolder hl = ft;
 
     for (uint32_t t : hl)
     {
@@ -52,14 +52,13 @@ SpeedCameraIndexBuilder::SpeedCameraIndexBuilder(Index & index)
       if (type == req)
       {
         ft.ParseGeometry(FeatureType::BEST_GEOMETRY);
-        m_cameras.emplace_back(ft.GetID().m_index, ft.GetCenter());
+        m_camerasTree.Add(SpeedCameraFeature(ft.GetID().m_index, ft.GetCenter()));
         break;
       }
     }
   };
 
   index.ForEachInScale(f, scales::GetUpperScale());
-  LOG(LINFO, ("Found ", m_cameras.size(), " cameras."));
 }
 
 void SpeedCameraIndexBuilder::AddVehicleFeature(FeatureType const & ft)
@@ -71,16 +70,15 @@ void SpeedCameraIndexBuilder::AddVehicleFeature(FeatureType const & ft)
 
   for (size_t i = 0; i < ft.GetPointsCount(); ++i)
   {
-    //TODO(ldragunov) Rewrite this with rtree index usage. ASAP.
-    for (auto const & cam : m_cameras)
-    {
-      if (cam.point == ft.GetPoint(i))
+    m2::PointD const & pt = ft.GetPoint(i);
+    // KDTree works only if we will have minimal delta.
+    m_camerasTree.ForEachInRect(MercatorBounds::RectByCenterXYAndSizeInMeters(pt, 0.1), [&](SpeedCameraFeature const & cam)
       {
-        LOG(LINFO, ("Camera snapped!"));
+        // Speed cam point must be one point of the feature geometry. So we can use strong equality.
+        if (cam.point != pt)
+          return;
         m_result.emplace_back(cam.fID, ft.GetID().m_index, i);
-        break;
-      }
-    }
+      });
   }
 }
 

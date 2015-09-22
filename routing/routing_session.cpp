@@ -124,6 +124,7 @@ void RoutingSession::Reset()
   m_turnsSound.Reset();
 
   m_passedDistanceOnRouteMeters = 0.0;
+  m_lastWarnedSpeedCamera = 0;
 }
 
 RoutingSession::State RoutingSession::OnLocationPositionChanged(m2::PointD const & position,
@@ -267,12 +268,18 @@ void RoutingSession::GetRouteFollowingInfo(FollowingInfo & info) const
     }
 
     // Warning signals checks
-    SpeedCameraRestriction cam(0, 0);
-    double const camDistance = m_route.GetCurrentCam(cam);
-    if (camDistance < kSpeedCameraWarningMeters)
+    if (m_routingSettings.m_speedCameraWarning)
     {
-      if (m_speedMpS > cam.m_maxSpeed * kMpsToKmh)
-        info.m_speedWarningSignal = true;
+      SpeedCameraRestriction cam(0, 0);
+      double const camDistance = m_route.GetCurrentCam(cam);
+      if (0 < camDistance && camDistance < kSpeedCameraWarningMeters)
+      {
+        if (cam.m_index > m_lastWarnedSpeedCamera && m_speedMpS > cam.m_maxSpeed * kMpsToKmh)
+        {
+          info.m_speedWarningSignal = true;
+          m_lastWarnedSpeedCamera = cam.m_index;
+        }
+      }
     }
 
     // Pedestrian info
@@ -326,6 +333,7 @@ void RoutingSession::AssignRoute(Route & route, IRouter::ResultCode e)
 
   route.SetRoutingSettings(m_routingSettings);
   m_route.Swap(route);
+  m_lastWarnedSpeedCamera = 0;
 }
 
 void RoutingSession::SetRouter(unique_ptr<IRouter> && router,

@@ -42,6 +42,7 @@ void Route::Swap(Route & rhs)
   swap(m_currentTime, rhs.m_currentTime);
   swap(m_turns, rhs.m_turns);
   swap(m_times, rhs.m_times);
+  swap(m_cameras, rhs.m_cameras);
   m_absentCountries.swap(rhs.m_absentCountries);
 }
 

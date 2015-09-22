@@ -7,6 +7,8 @@
 #include "coding/reader.hpp"
 #include "coding/read_write_utils.hpp"
 
+#include "geometry/tree4d.hpp"
+
 #include "base/base.hpp"
 
 #include "std/vector.hpp"
@@ -63,7 +65,15 @@ class SpeedCameraIndexBuilder
     SpeedCameraFeature(uint32_t fd, m2::PointD const & pnt) : fID(fd), point(pnt) {}
   };
 
-  vector<SpeedCameraFeature> m_cameras;
+  struct SpeedCameraFeatureTraits
+  {
+    m2::RectD LimitRect(SpeedCameraFeature const & ft) const
+    {
+      return m2::RectD(ft.point, ft.point);
+    }
+  };
+
+  m4::Tree<SpeedCameraFeature, SpeedCameraFeatureTraits> m_camerasTree;
   vector<SpeedCamera> m_result;
   set<uint32_t> m_checkedFIDs;
 
