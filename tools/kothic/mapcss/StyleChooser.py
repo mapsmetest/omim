@@ -223,7 +223,6 @@ class StyleChooser:
         """
         adds into the current ruleChain (existing Rule)
         """
-        # c = OptimizeCondition(c)
         self.ruleChains[-1].conditions.append(c)
 
     def addRuntimeCondition(self, c):

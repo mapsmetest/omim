@@ -188,7 +188,7 @@ class MapCSS():
             raise Exception("Variable not found: " + str(format(name)))
         return self.variables[name] if name in self.variables else m.group()
 
-    def parse(self, css=None, clamp=True, stretch=1000, filename=None):
+    def parse(self, css=None, clamp=True, stretch=1000, filename=None, mapcss_tags=None):
         """
         Parses MapCSS given as string
         """
@@ -272,8 +272,12 @@ class MapCSS():
                             sc.newObject()
                         cond = CONDITION.match(css).groups()[0]
                         log.debug("condition found: %s" % (cond))
+                        c = parseCondition(cond)
+                        tag = c.extract_tag()
+                        if (tag != "*") and (mapcss_tags != None) and (tag not in mapcss_tags):
+                            raise Exception("Unknown tag '" + tag + "' in condition " + cond)
                         css = CONDITION.sub("", css)
-                        sc.addCondition(parseCondition(cond))
+                        sc.addCondition(c)
                         previous = oCONDITION
 
                     # Object - way, node, relation
