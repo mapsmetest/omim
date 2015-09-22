@@ -792,7 +792,7 @@ OsrmRouter::ResultCode OsrmRouter::MakeTurnAnnotation(
       {
         TSeg const & seg = buffer[k];
 
-        vector<routing::SpeedCamera> candidateCams;
+        map<uint32_t, routing::SpeedCamera> candidateCams;
 
         FeatureType ft;
         Index::FeaturesLoaderGuard loader(*m_pIndex, mapping->GetMwmId());
@@ -813,14 +813,10 @@ OsrmRouter::ResultCode OsrmRouter::MakeTurnAnnotation(
         {
           for (auto idx = startIdx; idx <= endIdx; ++idx)
           {
-            for (auto const & cam : candidateCams)
-            {
-              if (cam.pointOffset == idx)
-              {
-                //TODO (ldragunov) think about this place. It smells bad.
-                cameras.emplace_back(idx, ReadCamRestriction(ft));
-              }
-            }
+            auto it = candidateCams.find(idx);
+            if (it != candidateCams.end())
+              cameras.emplace_back(points.size(), ReadCamRestriction(ft));
+
             points.push_back(ft.GetPoint(idx));
             if (needTime && idx > startIdx)
               estimatedTime += MercatorBounds::DistanceOnEarth(ft.GetPoint(idx - 1), ft.GetPoint(idx)) / carModel.GetSpeed(ft);
@@ -832,14 +828,12 @@ OsrmRouter::ResultCode OsrmRouter::MakeTurnAnnotation(
           {
             if (needTime)
               estimatedTime += MercatorBounds::DistanceOnEarth(ft.GetPoint(idx - 1), ft.GetPoint(idx)) / carModel.GetSpeed(ft);
+
+            auto it = candidateCams.find(idx);
+            if (it != candidateCams.end())
+              cameras.emplace_back(points.size(), ReadCamRestriction(ft));
+
             points.push_back(ft.GetPoint(idx));
-            for (auto const & cam : candidateCams)
-            {
-              if (cam.pointOffset == idx)
-              {
-                cameras.emplace_back(idx, ReadCamRestriction(ft));
-              }
-            }
           }
           points.push_back(ft.GetPoint(endIdx));
         }

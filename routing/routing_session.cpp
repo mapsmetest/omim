@@ -211,7 +211,6 @@ void RoutingSession::GetRouteFollowingInfo(FollowingInfo & info) const
   threads::MutexGuard guard(m_routeSessionMutex);
   UNUSED_VALUE(guard);
 
-  // TODO (ldragunov) Refactor this.
   if (!m_route.IsValid() || !IsNavigable())
   {
     // nothing should be displayed on the screen about turns if these lines are executed

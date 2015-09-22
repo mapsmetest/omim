@@ -12,6 +12,7 @@
 #include "base/base.hpp"
 
 #include "std/vector.hpp"
+#include "std/map.hpp"
 
 class Writer;
 class Index;
@@ -52,7 +53,7 @@ public:
 
   vector<SpeedCamera> const & GetCameras() const { return m_cameras; }
 
-  void GetCamerasByFID(uint32_t fid, vector<SpeedCamera> & cameras) const;
+  void GetCamerasByFID(uint32_t fid, map<uint32_t, SpeedCamera> & cameras) const;
 };
 
 class SpeedCameraIndexBuilder

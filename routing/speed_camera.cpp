@@ -91,12 +91,12 @@ void SpeedCameraIndexBuilder::Serialize(Writer & writer)
   LOG(LINFO, ("Write ", size, "speed camera records."));
 }
 
-void SpeedCameraIndex::GetCamerasByFID(uint32_t fid, vector<SpeedCamera> & cameras) const
+void SpeedCameraIndex::GetCamerasByFID(uint32_t fid, map<uint32_t, SpeedCamera> & cameras) const
 {
   cameras.clear();
   SpeedCamera cam(0 /* camFID */, fid /* roadFID */, 0 /* offset */);
   auto it = lower_bound(m_cameras.begin(), m_cameras.end(), cam, RoadCameraComparator);
   while (it != m_cameras.end() && it->roadFID == fid)
-    cameras.push_back(*it++);
+    cameras.insert(make_pair(it->roadFID, *it++));
 }
 }  // namespace routing
