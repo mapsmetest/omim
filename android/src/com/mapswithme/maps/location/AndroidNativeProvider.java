@@ -1,132 +1,147 @@
 package com.mapswithme.maps.location;
 
-
 import android.content.Context;
 import android.location.Location;
+import android.location.LocationListener;
 import android.location.LocationManager;
-import android.os.Bundle;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 
 import com.mapswithme.maps.MwmApplication;
 import com.mapswithme.util.LocationUtils;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.ListIterator;
 
-public class AndroidNativeProvider extends BaseLocationProvider implements android.location.LocationListener
+class AndroidNativeProvider extends BaseLocationProvider
 {
-  private LocationManager mLocationManager;
-  private boolean mIsActive;
+  private final static String TAG = AndroidNativeProvider.class.getSimpleName();
+  private final static String[] TRUSTED_PROVIDERS = { LocationManager.NETWORK_PROVIDER,
+                                                      LocationManager.GPS_PROVIDER };
 
-  public AndroidNativeProvider()
+  @NonNull
+  private final LocationManager mLocationManager;
+  @NonNull
+  private final List<LocationListener> mListeners = new ArrayList<>();
+
+  AndroidNativeProvider(@NonNull LocationFixChecker locationFixChecker)
   {
+    super(locationFixChecker);
     mLocationManager = (LocationManager) MwmApplication.get().getSystemService(Context.LOCATION_SERVICE);
   }
 
+  @SuppressWarnings("MissingPermission")
+  // A permission is checked externally
   @Override
-  protected void startUpdates()
+  protected void start()
   {
-    if (mIsActive)
+    LOGGER.d(TAG, "Android native provider is started");
+    if (isActive())
       return;
 
-    final List<String> providers = getFilteredProviders();
-
-    if (providers.size() == 0)
-      LocationHelper.INSTANCE.notifyLocationError(LocationHelper.ERROR_DENIED);
-    else
+    List<String> providers = getAvailableProviders(mLocationManager);
+    if (providers.isEmpty())
     {
-      mIsActive = true;
-      for (final String provider : providers)
-        mLocationManager.requestLocationUpdates(provider, LOCATION_UPDATE_INTERVAL, 0, this);
+      setActive(false);
+      return;
+    }
 
-      LocationHelper.INSTANCE.registerSensorListeners();
+    setActive(true);
+    for (String provider : providers)
+    {
+      LocationListener listener = new BaseLocationListener(getLocationFixChecker());
+      long interval = LocationHelper.INSTANCE.getInterval();
+      LOGGER.d(TAG, "Request Android native provider '" + provider
+                    + "' to get locations at this interval = " + interval + " ms");
+      mLocationManager.requestLocationUpdates(provider, interval, 0, listener);
+      mListeners.add(listener);
+    }
 
-      final Location newLocation = findBestNotExpiredLocation(providers);
-      if (isLocationBetterThanLast(newLocation))
-        LocationHelper.INSTANCE.setLastLocation(newLocation);
-      else
+    LocationHelper.INSTANCE.startSensors();
+
+    Location location = findBestNotExpiredLocation(mLocationManager, providers,
+                                                   LocationUtils.LOCATION_EXPIRATION_TIME_MILLIS_SHORT);
+    if (location != null && !getLocationFixChecker().isLocationBetterThanLast(location))
+    {
+      location = LocationHelper.INSTANCE.getSavedLocation();
+      if (location == null || LocationUtils.isExpired(location, LocationHelper.INSTANCE.getSavedLocationTime(),
+                                                      LocationUtils.LOCATION_EXPIRATION_TIME_MILLIS_SHORT))
       {
-        final Location lastLocation = LocationHelper.INSTANCE.getLastLocation();
-        if (lastLocation != null && !LocationUtils.isExpired(lastLocation, LocationHelper.INSTANCE.getLastLocationTime(),
-                                                             LocationUtils.LOCATION_EXPIRATION_TIME_MILLIS_SHORT))
-          LocationHelper.INSTANCE.setLastLocation(lastLocation);
+        return;
       }
     }
+
+    if (location != null)
+      onLocationChanged(location);
+  }
+
+  private void onLocationChanged(@NonNull Location location)
+  {
+    ListIterator<LocationListener> iterator = mListeners.listIterator();
+    // All listeners have to be notified only through safe list iterator interface,
+    // otherwise ConcurrentModificationException will be obtained, because each listener can
+    // cause 'stop' method calling and modifying the collection during this iteration.
+    // noinspection WhileLoopReplaceableByForEach
+    while (iterator.hasNext())
+      iterator.next().onLocationChanged(location);
   }
 
   @Override
-  protected void stopUpdates()
+  protected void stop()
   {
-    mLocationManager.removeUpdates(this);
-    mIsActive = false;
+    LOGGER.d(TAG, "Android native provider is stopped");
+    ListIterator<LocationListener> iterator = mListeners.listIterator();
+    // noinspection WhileLoopReplaceableByForEach
+    while (iterator.hasNext())
+      mLocationManager.removeUpdates(iterator.next());
+
+    mListeners.clear();
+    setActive(false);
   }
 
-  private Location findBestNotExpiredLocation(List<String> providers)
+  @Nullable
+  static Location findBestNotExpiredLocation(long expirationMillis)
+  {
+    final LocationManager manager = (LocationManager) MwmApplication.get().getSystemService(Context.LOCATION_SERVICE);
+    return findBestNotExpiredLocation(manager,
+                                      getAvailableProviders(manager),
+                                      expirationMillis);
+  }
+
+  @Nullable
+  private static Location findBestNotExpiredLocation(LocationManager manager, List<String> providers, long expirationMillis)
   {
     Location res = null;
-    for (final String pr : providers)
+    try
     {
-      final Location l = mLocationManager.getLastKnownLocation(pr);
-      if (l != null && !LocationUtils.isExpired(l, l.getTime(), LocationUtils.LOCATION_EXPIRATION_TIME_MILLIS_SHORT))
+      for (final String pr : providers)
       {
-        if (res == null || res.getAccuracy() > l.getAccuracy())
-          res = l;
+        final Location last = manager.getLastKnownLocation(pr);
+        if (last == null || LocationUtils.isExpired(last, last.getTime(), expirationMillis))
+          continue;
+
+        if (res == null || res.getAccuracy() > last.getAccuracy())
+          res = last;
       }
+    }
+    catch (SecurityException e)
+    {
+      LOGGER.e(TAG, "Dynamic permission ACCESS_COARSE_LOCATION/ACCESS_FINE_LOCATION is not granted",
+               e);
     }
     return res;
   }
 
-  private List<String> getFilteredProviders()
+  @NonNull
+  private static List<String> getAvailableProviders(@NonNull LocationManager locationManager)
   {
-    final List<String> allProviders = mLocationManager.getProviders(false);
-    final List<String> acceptedProviders = new ArrayList<>(allProviders.size());
-
-    for (final String prov : allProviders)
+    final List<String> res = new ArrayList<>();
+    for (String provider : TRUSTED_PROVIDERS)
     {
-      if (LocationManager.PASSIVE_PROVIDER.equals(prov))
-        continue;
-
-      if (!mLocationManager.isProviderEnabled(prov))
-      {
-        if (LocationManager.GPS_PROVIDER.equals(prov))
-          LocationHelper.INSTANCE.notifyLocationError(LocationHelper.ERROR_GPS_OFF);
-        continue;
-      }
-
-      acceptedProviders.add(prov);
+      if (locationManager.isProviderEnabled(provider))
+        res.add(provider);
     }
-
-    return acceptedProviders;
-  }
-
-  @Override
-  public void onLocationChanged(Location l)
-  {
-    // Completely ignore locations without lat and lon
-    if (l.getAccuracy() <= 0.0)
-      return;
-
-    if (isLocationBetterThanLast(l))
-    {
-      LocationHelper.INSTANCE.initMagneticField(l);
-      LocationHelper.INSTANCE.setLastLocation(l);
-    }
-  }
-
-  @Override
-  public void onProviderDisabled(String provider)
-  {
-    mLogger.d("Disabled location provider: ", provider);
-  }
-
-  @Override
-  public void onProviderEnabled(String provider)
-  {
-    mLogger.d("Enabled location provider: ", provider);
-  }
-
-  @Override
-  public void onStatusChanged(String provider, int status, Bundle extras)
-  {
-    mLogger.d("Status changed for location provider: ", provider, status);
+    return res;
   }
 }

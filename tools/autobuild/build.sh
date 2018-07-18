@@ -42,18 +42,16 @@ StripCygwinPrefix() {
 # 3rd param: additional qmake parameters
 BuildQt() {
   (
-    # set qmake path
-    QMAKE="$(PrintQmakePath)" || ( echo "ERROR: qmake was not found, please add it to your PATH or into the tools/autobuild/detect_qmake.sh"; exit 1 )
     SHADOW_DIR="$1"
     MKSPEC="$2"
     QMAKE_PARAMS="$3"
 
     mkdir -p "$SHADOW_DIR"
     cd "$SHADOW_DIR"
-    if [ ! -f "$SHADOW_DIR/Makefile" ]; then
-      echo "Launching qmake..."
-      "$QMAKE" CONFIG-=sdk -r "$QMAKE_PARAMS" -spec "$(StripCygwinPrefix $MKSPEC)" "$(StripCygwinPrefix $MY_PATH)/../../omim.pro"
-    fi
+    echo "Launching qmake..."
+    # This call is needed to correctly rebuild c++ sources after switching between branches with added or removed source files.
+    # Otherwise we get build errors.
+    "$QMAKE" -r CONFIG-=sdk "$QMAKE_PARAMS" -spec "$(StripCygwinPrefix $MKSPEC)" "$(StripCygwinPrefix $MY_PATH)/../../omim.pro"
 #    make clean > /dev/null || true
     make -j $(GetCPUCores)
   )

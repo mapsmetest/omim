@@ -1,6 +1,8 @@
 // Boost.Geometry (aka GGL, Generic Geometry Library)
 
-// Copyright (c) 2014, Oracle and/or its affiliates.
+// Copyright (c) 2017 Adam Wulkiewicz, Lodz, Poland.
+
+// Copyright (c) 2014-2015, Oracle and/or its affiliates.
 
 // Licensed under the Boost Software License version 1.0.
 // http://www.boost.org/users/license.html
@@ -15,6 +17,7 @@
 #include <iterator>
 
 #include <boost/range.hpp>
+#include <boost/throw_exception.hpp>
 
 #include <boost/geometry/core/assert.hpp>
 #include <boost/geometry/core/tag.hpp>
@@ -22,6 +25,7 @@
 
 #include <boost/geometry/algorithms/detail/overlay/copy_segments.hpp>
 #include <boost/geometry/algorithms/detail/overlay/follow.hpp>
+#include <boost/geometry/algorithms/detail/overlay/inconsistent_turns_exception.hpp>
 #include <boost/geometry/algorithms/detail/overlay/overlay_type.hpp>
 #include <boost/geometry/algorithms/detail/overlay/segment_identifier.hpp>
 #include <boost/geometry/algorithms/detail/overlay/turn_info.hpp>
@@ -34,24 +38,6 @@
 
 namespace boost { namespace geometry
 {
-
-#if ! defined(BOOST_GEOMETRY_OVERLAY_NO_THROW)
-class inconsistent_turns_exception : public geometry::exception
-{
-public:
-
-    inline inconsistent_turns_exception() {}
-
-    virtual ~inconsistent_turns_exception() throw()
-    {}
-
-    virtual char const* what() const throw()
-    {
-        return "Boost.Geometry Inconsistent Turns exception";
-    }
-};
-#endif
-
 
 #ifndef DOXYGEN_NO_DETAIL
 namespace detail { namespace overlay
@@ -282,7 +268,7 @@ protected:
                     false, false // do not reverse; do not remove spikes
                 >::apply(linestring,
                          current_segment_id,
-                         static_cast<signed_index_type>(boost::size(linestring) - 1),
+                         static_cast<signed_size_type>(boost::size(linestring) - 1),
                          robust_policy,
                          current_piece);
         }
@@ -324,7 +310,7 @@ public:
 #if ! defined(BOOST_GEOMETRY_OVERLAY_NO_THROW)
         if (enter_count != 0)
         {
-            throw inconsistent_turns_exception();
+            BOOST_THROW_EXCEPTION(inconsistent_turns_exception());
         }
 #else
         BOOST_GEOMETRY_ASSERT(enter_count == 0);
@@ -404,7 +390,7 @@ protected:
     };
 
     template <typename TurnIterator>
-    static inline signed_index_type get_multi_index(TurnIterator it)
+    static inline signed_size_type get_multi_index(TurnIterator it)
     {
         return boost::begin(it->operations)->seg_id.multi_index;
     }
@@ -412,10 +398,10 @@ protected:
     class has_other_multi_id
     {
     private:
-        signed_index_type m_multi_id;
+        signed_size_type m_multi_id;
 
     public:
-        has_other_multi_id(signed_index_type multi_id)
+        has_other_multi_id(signed_size_type multi_id)
             : m_multi_id(multi_id) {}
 
         template <typename Turn>
@@ -446,7 +432,7 @@ public:
         // Iterate through all intersection points (they are
         // ordered along the each linestring)
 
-        signed_index_type current_multi_id = get_multi_index(first);
+        signed_size_type current_multi_id = get_multi_index(first);
 
         oit = copy_linestrings::apply(ls_first,
                                       ls_first + current_multi_id,
@@ -463,7 +449,7 @@ public:
             oit = Base::apply(*(ls_first + current_multi_id),
                               linear, per_ls_current, per_ls_next, oit);
 
-            signed_index_type next_multi_id(-1);
+            signed_size_type next_multi_id = -1;
             linestring_iterator ls_next = ls_beyond;
             if ( per_ls_next != beyond )
             {

@@ -19,17 +19,25 @@ public class AlohaHelper
     org.alohalytics.Statistics.logEvent(ALOHA_EXCEPTION, new String[] {e.getClass().getSimpleName(), e.getMessage()});
   }
 
-  public static final String SETTINGS_CONTACT_US = "contactUs";
-  public static final String SETTINGS_MAIL_SUBSCRIBE = "subscribeToNews";
-  public static final String SETTINGS_REPORT_BUG = "reportABug";
-  public static final String SETTINGS_RATE = "rate";
-  public static final String SETTINGS_FB = "likeOnFb";
-  public static final String SETTINGS_TWITTER = "followOnTwitter";
-  public static final String SETTINGS_HELP = "help";
-  public static final String SETTINGS_ABOUT = "about";
-  public static final String SETTINGS_COPYRIGHT = "copyright";
-  public static final String SETTINGS_COMMUNITY = "community";
-  public static final String SETTINGS_CHANGE_UNITS = "settingsMiles";
+  public static class Settings
+  {
+    public static final String WEB_SITE = "webSite";
+    public static final String WEB_BLOG = "webBlog";
+    public static final String FEEDBACK_GENERAL = "generalFeedback";
+    public static final String MAIL_SUBSCRIBE = "subscribeToNews";
+    public static final String REPORT_BUG = "reportABug";
+    public static final String RATE = "rate";
+    public static final String TELL_FRIEND = "tellFriend";
+    public static final String FACEBOOK = "likeOnFb";
+    public static final String TWITTER = "followOnTwitter";
+    public static final String HELP = "help";
+    public static final String ABOUT = "about";
+    public static final String COPYRIGHT = "copyright";
+    public static final String CHANGE_UNITS = "settingsMiles";
+
+    private Settings() {}
+  }
+
   // for aloha stats
   public static final String ALOHA_CLICK = "$onClick";
   public static final String ALOHA_LONG_CLICK = "$onLongClick";
@@ -45,6 +53,8 @@ public class AlohaHelper
   public static final String MENU_DOWNLOADER = "downloader";
   public static final String MENU_SETTINGS = "settingsAndMore";
   public static final String MENU_SHARE = "share@";
+  public static final String MENU_POINT2POINT = "point2point";
+  public static final String MENU_ADD_PLACE = "addPlace";
   // place page
   public static final String PP_OPEN = "ppOpen";
   public static final String PP_CLOSE = "ppClose";
@@ -56,18 +66,22 @@ public class AlohaHelper
   public static final String PP_DIRECTION_ARROW_CLOSE = "ppDirectionArrowClose";
   public static final String PP_METADATA_COPY = "ppCopyMetadata";
   // routing
+  public static final String ROUTING_BUILD = "routeBuild";
   public static final String ROUTING_CLOSE = "routeClose";
-  public static final String ROUTING_GO = "routeGo";
-  public static final String ROUTING_GO_CLOSE = "routeGoClose";
-  public static final String ROUTING_PROGRESS_CLOSE = "routeProgressClose";
+  public static final String ROUTING_START = "routeGo";
+  public static final String ROUTING_START_SUGGEST_REBUILD = "routeGoRebuild";
   public static final String ROUTING_CANCEL = "routeCancel";
-  public static final String ROUTING_PEDESTRIAN_SET = "routerSetPedestrian";
   public static final String ROUTING_VEHICLE_SET = "routerSetVehicle";
+  public static final String ROUTING_PEDESTRIAN_SET = "routerSetPedestrian";
+  public static final String ROUTING_BICYCLE_SET = "routerSetBicycle";
+  public static final String ROUTING_TAXI_SET = "routerSetTaxi";
+  public static final String ROUTING_TRANSIT_SET = "routerSetTransit";
+  public static final String ROUTING_SWAP_POINTS = "routeSwapPoints";
+  public static final String ROUTING_TOGGLE = "routeToggle";
+  public static final String ROUTING_SEARCH_POINT = "routSearchPoint";
+  public static final String ROUTING_SETTINGS = "routingSettings";
   // search
   public static final String SEARCH_CANCEL = "searchCancel";
-  // installation of Parse
-  public static final String PARSE_INSTALLATION_ID = "Android_Parse_Installation_Id";
-  public static final String PARSE_DEVICE_TOKEN = "Android_Parse_Device_Token";
   // installation
   public static final String GPLAY_INSTALL_REFERRER = "$googlePlayInstallReferrer";
 }

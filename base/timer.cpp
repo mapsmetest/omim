@@ -1,14 +1,18 @@
-#include "base/timer.hpp"
 #include "base/assert.hpp"
+#include "base/get_time.hpp"
 #include "base/macros.hpp"
+#include "base/timegm.hpp"
+#include "base/timer.hpp"
 
 #include "std/target_os.hpp"
-#include "std/systime.hpp"
-#include "std/cstdio.hpp"
-#include "std/sstream.hpp"
-#include "std/iomanip.hpp"
-#include "std/algorithm.hpp"
 
+#include <algorithm>
+#include <chrono>
+#include <cstdio>
+#include <iomanip>
+#include <sstream>
+
+#include <sys/time.h>
 
 namespace my
 {
@@ -37,10 +41,10 @@ double Timer::LocalTime()
 #endif
 }
 
-string FormatCurrentTime()
+std::string FormatCurrentTime()
 {
   time_t t = time(NULL);
-  string s(ctime(&t));
+  std::string s(ctime(&t));
 
   replace(s.begin(), s.end(), ' ', '_');
 
@@ -49,46 +53,24 @@ string FormatCurrentTime()
   return s;
 }
 
-uint32_t GenerateTimestamp(int year, int month, int day)
+uint32_t GenerateYYMMDD(int year, int month, int day)
 {
-  return (year - 100) * 10000 + (month + 1) * 100 + day;
+  uint32_t result = (year - 100) * 100;
+  result = (result + month + 1) * 100;
+  result = result + day;
+  return result;
 }
 
-uint32_t TodayAsYYMMDD()
+uint64_t SecondsSinceEpoch()
 {
-  time_t rawTime = time(NULL);
-  tm const * const pTm = gmtime(&rawTime);
-  CHECK(pTm, ("Can't get current date."));
-  return GenerateTimestamp(pTm->tm_year, pTm->tm_mon, pTm->tm_mday);
+  return TimeTToSecondsSinceEpoch(::time(nullptr));
 }
 
-namespace
+std::string TimestampToString(time_t time)
 {
-  time_t my_timegm(tm * tm)
-  {
-#ifdef OMIM_OS_ANDROID
-    char * tz = getenv("TZ");
-    setenv("TZ", "", 1);
-    tzset();
+  if (time == INVALID_TIME_STAMP)
+    return std::string("INVALID_TIME_STAMP");
 
-    time_t ret = mktime(tm);
-    if (tz)
-      setenv("TZ", tz, 1);
-    else
-      unsetenv("TZ");
-    tzset();
-
-    return ret;
-#elif defined(OMIM_OS_WINDOWS)
-    return mktime(tm);
-#else
-    return timegm(tm);
-#endif
-  }
-}
-
-string TimestampToString(time_t time)
-{
   tm * t = gmtime(&time);
   char buf[21] = { 0 };
 #ifdef OMIM_OS_WINDOWS
@@ -102,20 +84,23 @@ string TimestampToString(time_t time)
   return buf;
 }
 
+std::string SecondsSinceEpochToString(uint64_t secondsSinceEpoch)
+{
+  return TimestampToString(SecondsSinceEpochToTimeT(secondsSinceEpoch));
+}
+
 namespace
 {
-
 bool IsValid(tm const & t)
 {
   /// @todo Funny thing, but "00" month is accepted as valid in get_time function.
   /// Seems like a bug in the std library.
-  return (t.tm_mday >= 1 && t.tm_mday<= 31 &&
+  return (t.tm_mday >= 1 && t.tm_mday <= 31 &&
           t.tm_mon >= 0 && t.tm_mon <= 11);
 }
-
 }
 
-time_t StringToTimestamp(string const & s)
+time_t StringToTimestamp(std::string const & s)
 {
   // Return current time in the case of failure
   time_t res = INVALID_TIME_STAMP;
@@ -123,24 +108,24 @@ time_t StringToTimestamp(string const & s)
   if (s.size() == 20)
   {
     // Parse UTC format: 1970-01-01T00:00:00Z
-    tm t;
-    istringstream ss(s);
-    ss >> get_time(&t, "%Y-%m-%dT%H:%M:%SZ");
+    tm t{};
+    std::istringstream ss(s);
+    ss >> base::get_time(&t, "%Y-%m-%dT%H:%M:%SZ");
 
     if (!ss.fail() && IsValid(t))
-      res = my_timegm(&t);
+      res = base::TimeGM(t);
   }
   else if (s.size() == 25)
   {
     // Parse custom time zone offset format: 2012-12-03T00:38:34+03:30
-    tm t1, t2;
+    tm t1{}, t2{};
     char sign;
-    istringstream ss(s);
-    ss >> get_time(&t1, "%Y-%m-%dT%H:%M:%S") >> sign >> get_time(&t2, "%H:%M");
+    std::istringstream ss(s);
+    ss >> base::get_time(&t1, "%Y-%m-%dT%H:%M:%S") >> sign >> base::get_time(&t2, "%H:%M");
 
     if (!ss.fail() && IsValid(t1))
     {
-      time_t const tt = my_timegm(&t1);
+      time_t const tt = base::TimeGM(t1);
 
       // Fix timezone offset
       if (sign == '-')
@@ -161,12 +146,33 @@ HighResTimer::HighResTimer(bool start/* = true*/)
 
 void HighResTimer::Reset()
 {
-  m_start = high_resolution_clock::now();
+  m_start = std::chrono::high_resolution_clock::now();
 }
 
 uint64_t HighResTimer::ElapsedNano() const
 {
-  return duration_cast<nanoseconds>(high_resolution_clock::now() - m_start).count();
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - m_start).count();
 }
 
+uint64_t HighResTimer::ElapsedMillis() const
+{
+  return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - m_start).count();
+}
+
+double HighResTimer::ElapsedSeconds() const
+{
+  return std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::high_resolution_clock::now() - m_start).count();
+}
+
+time_t SecondsSinceEpochToTimeT(uint64_t secondsSinceEpoch)
+{
+  std::chrono::time_point<std::chrono::system_clock> const tpoint{std::chrono::seconds(secondsSinceEpoch)};
+  return std::chrono::system_clock::to_time_t(tpoint);
+}
+
+uint64_t TimeTToSecondsSinceEpoch(time_t time)
+{
+  auto const tpoint = std::chrono::system_clock::from_time_t(time);
+  return std::chrono::duration_cast<std::chrono::seconds>(tpoint.time_since_epoch()).count();
+}
 }

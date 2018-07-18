@@ -3,176 +3,226 @@
 #include <jni.h>
 
 #include "map/framework.hpp"
+#include "map/place_page_info.hpp"
+
+#include "ugc/api.hpp"
 
 #include "search/result.hpp"
 
+#include "drape_frontend/gui/skin.hpp"
+
+#include "drape/pointers.hpp"
+#include "drape/oglcontextfactory.hpp"
+
+#include "local_ads/event.hpp"
+
+#include "partners_api/booking_api.hpp"
+#include "partners_api/locals_api.hpp"
+
 #include "platform/country_defines.hpp"
+#include "platform/location.hpp"
 
 #include "geometry/avg_vector.hpp"
 
-#include "base/deferred_task.hpp"
 #include "base/timer.hpp"
 
 #include "indexer/map_style.hpp"
 
-#include "std/map.hpp"
-#include "std/shared_ptr.hpp"
-#include "std/unique_ptr.hpp"
+#include <cstdint>
+#include <map>
+#include <memory>
+#include <mutex>
 
-#include "../../../nv_event/nv_event.hpp"
+class DataSource;
+struct FeatureID;
 
+namespace search
+{
+struct EverywhereSearchParams;
+}
 
-class CountryStatusDisplay;
+namespace booking
+{
+struct BlockParams;
+}
 
 namespace android
 {
-  class Framework : public storage::CountryTree::CountryTreeListener,
-                    public storage::ActiveMapsLayout::ActiveMapsListener
+  class Framework
   {
   private:
+    drape_ptr<dp::ThreadSafeFactory> m_contextFactory;
     ::Framework m_work;
-    VideoTimer * m_videoTimer;
-
-    typedef shared_ptr<jobject> TJobject;
-
-    TJobject m_javaCountryListener;
-    typedef map<int, TJobject> TListenerMap;
-    TListenerMap m_javaActiveMapListeners;
-    int m_currentSlotID;
-
-    int m_activeMapsConnectionID;
-
-    void CallRepaint();
-
-    double m_x1;
-    double m_y1;
-    double m_x2;
-    double m_y2;
-    int m_mask;
-
-    bool m_doLoadState;
-
-    /// @name Single click processing parameters.
-    //@{
-    my::Timer m_doubleClickTimer;
-    bool m_isCleanSingleClick;
-    double m_lastX1;
-    double m_lastY1;
-    //@}
 
     math::LowPassVector<float, 3> m_sensors[2];
     double m_lastCompass;
 
-    unique_ptr<DeferredTask> m_deferredTask;
-    bool m_wasLongClick;
+    std::string m_searchQuery;
 
-    int m_densityDpi;
-    int m_screenWidth;
-    int m_screenHeight;
+    bool m_isContextDestroyed;
 
-    void StartTouchTask(double x, double y, unsigned ms);
-    void KillTouchTask();
-    void OnProcessTouchTask(double x, double y, unsigned ms);
+    std::map<gui::EWidget, gui::Position> m_guiPositions;
 
-    string m_searchQuery;
+    void TrafficStateChanged(TrafficManager::TrafficState state);
+    void TransitSchemeStateChanged(TransitReadManager::TransitSchemeState state);
 
-    void SetBestDensity(int densityDpi, RenderPolicy::Params & params);
+    void MyPositionModeChanged(location::EMyPositionMode mode, bool routingActive);
 
-    bool InitRenderPolicyImpl(int densityDpi, int screenWidth, int screenHeight);
+    location::TMyPositionModeChanged m_myPositionModeSignal;
+    location::EMyPositionMode m_currentMode;
+    bool m_isCurrentModeInitialized;
+
+    TrafficManager::TrafficStateChangedFn m_onTrafficStateChangedFn;
+    TransitReadManager::TransitStateChangedFn m_onTransitStateChangedFn;
+
+    bool m_isChoosePositionMode;
+
+    place_page::Info m_info;
 
   public:
     Framework();
-    ~Framework();
 
-    storage::Storage & Storage();
-    CountryStatusDisplay * GetCountryStatusDisplay();
+    storage::Storage & GetStorage();
+    DataSource const & GetDataSource();
 
-    void DontLoadState() { m_doLoadState = false; }
-
-    void ShowCountry(storage::TIndex const & idx, bool zoomToDownloadButton);
-    storage::TStatus GetCountryStatus(storage::TIndex const & idx) const;
+    void ShowNode(storage::TCountryId const & countryId, bool zoomToDownloadButton);
 
     void OnLocationError(int/* == location::TLocationStatus*/ newStatus);
     void OnLocationUpdated(location::GpsInfo const & info);
-    void OnCompassUpdated(location::CompassInfo const & info, bool force);
+    void OnCompassUpdated(location::CompassInfo const & info, bool forceRedraw);
     void UpdateCompassSensor(int ind, float * arr);
 
     void Invalidate();
 
-    bool InitRenderPolicy(int densityDpi, int screenWidth, int screenHeight);
-    void DeleteRenderPolicy();
+    bool CreateDrapeEngine(JNIEnv * env, jobject jSurface, int densityDpi, bool firstLaunch,
+                           bool launchByDeepLink);
+    bool IsDrapeEngineCreated();
+
+    void DetachSurface(bool destroyContext);
+    bool AttachSurface(JNIEnv * env, jobject jSurface);
 
     void SetMapStyle(MapStyle mapStyle);
+    void MarkMapStyle(MapStyle mapStyle);
+    MapStyle GetMapStyle() const;
 
-    void SetRouter(routing::RouterType type) { m_work.SetRouter(type); }
-    routing::RouterType GetRouter() const { return m_work.GetRouter(); }
+    void SetupMeasurementSystem();
+
+    RoutingManager & GetRoutingManager() { return m_work.GetRoutingManager(); }
+    void SetRouter(routing::RouterType type) { m_work.GetRoutingManager().SetRouter(type); }
+    routing::RouterType GetRouter() const { return m_work.GetRoutingManager().GetRouter(); }
+    routing::RouterType GetLastUsedRouter() const
+    {
+      return m_work.GetRoutingManager().GetLastUsedRouter();
+    }
 
     void Resize(int w, int h);
 
-    void DrawFrame();
+    struct Finger
+    {
+      Finger(int64_t id, float x, float y)
+        : m_id(id)
+        , m_x(x)
+        , m_y(y)
+      {
+      }
 
-    void Move(int mode, double x, double y);
-    void Zoom(int mode, double x1, double y1, double x2, double y2);
-    void Touch(int action, int mask, double x1, double y1, double x2, double y2);
+      int64_t m_id;
+      float m_x, m_y;
+    };
 
-    void LoadState();
-    void SaveState();
+    void Touch(int action, Finger const & f1, Finger const & f2, uint8_t maskedPointer);
 
-    void SetupMeasurementSystem();
+    bool Search(search::EverywhereSearchParams const & params);
+    std::string GetLastSearchQuery() { return m_searchQuery; }
+    void ClearLastSearchQuery() { m_searchQuery.clear(); }
 
     void AddLocalMaps();
     void RemoveLocalMaps();
 
-    storage::TIndex GetCountryIndex(double lat, double lon) const;
-    string GetCountryCode(double lat, double lon) const;
-
-    string GetCountryNameIfAbsent(m2::PointD const & pt) const;
     m2::PointD GetViewportCenter() const;
 
-    void AddString(string const & name, string const & value);
+    void AddString(std::string const & name, std::string const & value);
 
-    void Scale(double k);
+    void Scale(::Framework::EScaleMode mode);
+    void Scale(m2::PointD const & centerPt, int targetZoom, bool animate);
 
-    BookmarkAndCategory AddBookmark(size_t category, m2::PointD const & pt, BookmarkData & bm);
-    void ReplaceBookmark(BookmarkAndCategory const & ind, BookmarkData & bm);
-    size_t ChangeBookmarkCategory(BookmarkAndCategory const & ind, size_t newCat);
+    void ReplaceBookmark(kml::MarkId markId, kml::BookmarkData & bm);
+    void MoveBookmark(kml::MarkId markId, kml::MarkGroupId curCat, kml::MarkGroupId newCat);
 
     ::Framework * NativeFramework();
-    PinClickManager & GetPinClickManager() { return m_work.GetBalloonManager(); }
 
     bool IsDownloadingActive();
 
-    bool ShowMapForURL(string const & url);
+    bool ShowMapForURL(std::string const & url);
 
     void DeactivatePopup();
 
-    string GetOutdatedCountriesString();
+    std::string GetOutdatedCountriesString();
 
-    void ShowTrack(int category, int track);
+    void ShowTrack(kml::TrackId track);
 
-    void SetCountryTreeListener(shared_ptr<jobject> objPtr);
-    void ResetCountryTreeListener();
+    void SetMyPositionModeListener(location::TMyPositionModeChanged const & fn);
+    location::EMyPositionMode GetMyPositionMode();
+    void OnMyPositionModeChanged(location::EMyPositionMode mode);
+    void SwitchMyPositionNextMode();
 
-    int AddActiveMapsListener(shared_ptr<jobject> obj);
-    void RemoveActiveMapsListener(int slotID);
+    void SetTrafficStateListener(TrafficManager::TrafficStateChangedFn const & fn);
+    void SetTransitSchemeListener(TransitReadManager::TransitStateChangedFn const & fn);
+    bool IsTrafficEnabled();
+    void EnableTraffic();
+    void DisableTraffic();
 
-    // Fills mapobject's metadata from UserMark
-    void InjectMetadata(JNIEnv * env, jclass clazz, jobject const mapObject, UserMark const * userMark);
+    void Save3dMode(bool allow3d, bool allow3dBuildings);
+    void Set3dMode(bool allow3d, bool allow3dBuildings);
+    void Get3dMode(bool & allow3d, bool & allow3dBuildings);
 
-  public:
-    virtual void ItemStatusChanged(int childPosition);
-    virtual void ItemProgressChanged(int childPosition, storage::LocalAndRemoteSizeT const & sizes);
+    void SetChoosePositionMode(bool isChoosePositionMode, bool isBusiness, bool hasPosition, m2::PointD const & position);
+    bool GetChoosePositionMode();
 
-    virtual void CountryGroupChanged(storage::ActiveMapsLayout::TGroup const & oldGroup, int oldPosition,
-                                     storage::ActiveMapsLayout::TGroup const & newGroup, int newPosition);
-    virtual void CountryStatusChanged(storage::ActiveMapsLayout::TGroup const & group, int position,
-                                      storage::TStatus const & oldStatus, storage::TStatus const & newStatus);
-    virtual void CountryOptionsChanged(storage::ActiveMapsLayout::TGroup const & group,
-                                       int position, MapOptions const & oldOpt,
-                                       MapOptions const & newOpt);
-    virtual void DownloadingProgressUpdate(storage::ActiveMapsLayout::TGroup const & group, int position,
-                                           storage::LocalAndRemoteSizeT const & progress);
+    void SetupWidget(gui::EWidget widget, float x, float y, dp::Anchor anchor);
+    void ApplyWidgets();
+    void CleanWidgets();
+
+    void SetPlacePageInfo(place_page::Info const & info);
+    place_page::Info & GetPlacePageInfo();
+    void RequestBookingMinPrice(JNIEnv * env, jobject policy, booking::BlockParams && params,
+                                booking::BlockAvailabilityCallback const & callback);
+    void RequestBookingInfo(JNIEnv * env, jobject policy, 
+                            std::string const & hotelId, std::string const & lang,
+                            booking::GetHotelInfoCallback const & callback);
+
+    bool HasSpaceForMigration();
+    storage::TCountryId PreMigrate(ms::LatLon const & position, storage::Storage::TChangeCountryFunction const & statusChangeListener,
+                                                                storage::Storage::TProgressFunction const & progressListener);
+    void Migrate(bool keepOldMaps);
+
+    bool IsAutoRetryDownloadFailed();
+    bool IsDownloadOn3gEnabled();
+    void EnableDownloadOn3g();
+
+    uint64_t RequestTaxiProducts(JNIEnv * env, jobject policy, ms::LatLon const & from,
+                                 ms::LatLon const & to, taxi::SuccessCallback const & onSuccess,
+                                 taxi::ErrorCallback const & onError);
+    taxi::RideRequestLinks GetTaxiLinks(JNIEnv * env, jobject policy, taxi::Provider::Type type,
+                                        std::string const & productId, ms::LatLon const & from,
+                                        ms::LatLon const & to);
+
+    void RequestViatorProducts(JNIEnv * env, jobject policy, std::string const & destId,
+                               std::string const & currency,
+                               viator::GetTop5ProductsCallback const & callback);
+
+    void RequestUGC(FeatureID const & fid, ugc::Api::UGCCallback const & ugcCallback);
+    void SetUGCUpdate(FeatureID const & fid, ugc::UGCUpdate const & ugc);
+    void UploadUGC();
+
+    int ToDoAfterUpdate() const;
+
+    uint64_t GetLocals(JNIEnv * env, jobject policy, double lat, double lon,
+                       locals::LocalsSuccessCallback const & successFn,
+                       locals::LocalsErrorCallback const & errorFn);
+
+    void LogLocalAdsEvent(local_ads::EventType event, double lat, double lon, uint16_t accuracy);
   };
 }
 
-extern android::Framework * g_framework;
+extern unique_ptr<android::Framework> g_framework;

@@ -23,7 +23,8 @@ public class RoutingInfo
   public final String nextStreet;
   public final double completionPercent;
   // For vehicle routing.
-  public final VehicleTurnDirection vehicleTurnDirection;
+  public final CarDirection carDirection;
+  public final CarDirection nextCarDirection;
   public final int exitNum;
   public final SingleLaneInfo[] lanes;
   // For pedestrian routing.
@@ -31,57 +32,66 @@ public class RoutingInfo
   public final Location pedestrianNextDirection;
 
   /**
-   * IMPORTANT : Order of enum values MUST BE the same with native TurnDirection enum.
+   * IMPORTANT : Order of enum values MUST BE the same as native CarDirection enum.
    */
-  public enum VehicleTurnDirection
+  public enum CarDirection
   {
-    NO_TURN(R.drawable.ic_straight_light),
-    GO_STRAIGHT(R.drawable.ic_straight_light),
+    NO_TURN(R.drawable.ic_turn_straight, 0),
+    GO_STRAIGHT(R.drawable.ic_turn_straight, 0),
 
-    TURN_RIGHT(R.drawable.ic_simple_right_light),
-    TURN_SHARP_RIGHT(R.drawable.ic_sharp_right_light),
-    TURN_SLIGHT_RIGHT(R.drawable.ic_slight_right_light),
+    TURN_RIGHT(R.drawable.ic_turn_right, R.drawable.ic_then_right),
+    TURN_SHARP_RIGHT(R.drawable.ic_turn_right_sharp, R.drawable.ic_then_right_sharp),
+    TURN_SLIGHT_RIGHT(R.drawable.ic_turn_right_slight, R.drawable.ic_then_right_slight),
 
-    TURN_LEFT(R.drawable.ic_simple_right_light),
-    TURN_SHARP_LEFT(R.drawable.ic_sharp_right_light),
-    TURN_SLIGHT_LEFT(R.drawable.ic_slight_right_light),
+    TURN_LEFT(R.drawable.ic_turn_left, R.drawable.ic_then_left),
+    TURN_SHARP_LEFT(R.drawable.ic_turn_left_sharp, R.drawable.ic_then_left_sharp),
+    TURN_SLIGHT_LEFT(R.drawable.ic_turn_left_slight, R.drawable.ic_then_left_slight),
 
-    U_TURN(R.drawable.ic_uturn_light),
-    TAKE_THE_EXIT(R.drawable.ic_finish_point_light),
+    U_TURN_LEFT(R.drawable.ic_turn_uleft, R.drawable.ic_then_uleft),
+    U_TURN_RIGHT(R.drawable.ic_turn_uright, R.drawable.ic_then_uright),
 
-    ENTER_ROUND_ABOUT(R.drawable.ic_round_light),
-    LEAVE_ROUND_ABOUT(R.drawable.ic_round_light),
-    STAY_ON_ROUND_ABOUT(R.drawable.ic_round_light),
+    ENTER_ROUND_ABOUT(R.drawable.ic_turn_round, R.drawable.ic_then_round),
+    LEAVE_ROUND_ABOUT(R.drawable.ic_turn_round, R.drawable.ic_then_round),
+    STAY_ON_ROUND_ABOUT(R.drawable.ic_turn_round, R.drawable.ic_then_round),
 
-    START_AT_THE_END_OF_STREET(0),
-    REACHED_YOUR_DESTINATION(R.drawable.ic_finish_point_light);
+    START_AT_THE_END_OF_STREET(0, 0),
+    REACHED_YOUR_DESTINATION(R.drawable.ic_turn_finish, R.drawable.ic_then_finish),
 
-    private int mTurnRes;
+    EXIT_HIGHWAY_TO_LEFT(R.drawable.ic_exit_highway_to_left, R.drawable.ic_then_exit_highway_to_left),
+    EXIT_HIGHWAY_TO_RIGHT(R.drawable.ic_exit_highway_to_right, R.drawable.ic_then_exit_highway_to_right);
 
-    VehicleTurnDirection(@DrawableRes int resId)
+    private final int mTurnRes;
+    private final int mNextTurnRes;
+
+    CarDirection(@DrawableRes int mainResId, @DrawableRes int nextResId)
     {
-      mTurnRes = resId;
+      mTurnRes = mainResId;
+      mNextTurnRes = nextResId;
     }
 
     public void setTurnDrawable(ImageView imageView)
     {
       imageView.setImageResource(mTurnRes);
       imageView.setRotation(0.0f);
-      imageView.setScaleX(isLeftTurn(this) ? -1 : 1); // right turns are displayed as mirrored left turns.
     }
 
-    public static boolean isLeftTurn(VehicleTurnDirection turn)
+    public void setNextTurnDrawable(ImageView imageView)
     {
-      return turn == TURN_LEFT || turn == TURN_SHARP_LEFT || turn == TURN_SLIGHT_LEFT;
+      imageView.setImageResource(mNextTurnRes);
     }
 
-    public static boolean isRightTurn(VehicleTurnDirection turn)
+    public boolean containsNextTurn()
     {
-      return turn == TURN_RIGHT || turn == TURN_SHARP_RIGHT || turn == TURN_SLIGHT_RIGHT;
+      return mNextTurnRes != 0;
+    }
+
+    public static boolean isRoundAbout(CarDirection turn)
+    {
+      return turn == ENTER_ROUND_ABOUT || turn == LEAVE_ROUND_ABOUT || turn == STAY_ON_ROUND_ABOUT;
     }
   }
 
-  public enum PedestrianTurnDirection
+  enum PedestrianTurnDirection
   {
     NONE,
     UPSTAIRS,
@@ -90,9 +100,9 @@ public class RoutingInfo
     GATE,
     REACHED_YOUR_DESTINATION;
 
-    public void setTurnDrawable(ImageView view, DistanceAndAzimut distanceAndAzimut)
+    public static void setTurnDrawable(ImageView view, DistanceAndAzimut distanceAndAzimut)
     {
-      view.setImageResource(R.drawable.ic_direction_light);
+      view.setImageResource(R.drawable.ic_turn_direction);
       view.setRotation((float) Math.toDegrees(distanceAndAzimut.getAzimuth()));
     }
   }
@@ -119,7 +129,7 @@ public class RoutingInfo
   }
 
   public RoutingInfo(String distToTarget, String units, String distTurn, String turnSuffix, String currentStreet, String nextStreet, double completionPercent,
-                     int vehicleTurnOrdinal, int pedestrianTurnOrdinal, double pedestrianDirectionLat, double pedestrianDirectionLon, int exitNum,
+                     int vehicleTurnOrdinal, int vehicleNextTurnOrdinal, int pedestrianTurnOrdinal, double pedestrianDirectionLat, double pedestrianDirectionLon, int exitNum,
                      int totalTime, SingleLaneInfo[] lanes)
   {
     this.distToTarget = distToTarget;
@@ -130,7 +140,8 @@ public class RoutingInfo
     this.nextStreet = nextStreet;
     this.totalTimeInSeconds = totalTime;
     this.completionPercent = completionPercent;
-    this.vehicleTurnDirection = VehicleTurnDirection.values()[vehicleTurnOrdinal];
+    this.carDirection = CarDirection.values()[vehicleTurnOrdinal];
+    this.nextCarDirection = CarDirection.values()[vehicleNextTurnOrdinal];
     this.lanes = lanes;
     this.exitNum = exitNum;
     this.pedestrianTurnDirection = PedestrianTurnDirection.values()[pedestrianTurnOrdinal];

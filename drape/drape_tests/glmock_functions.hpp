@@ -16,7 +16,7 @@ public:
   static GLMockFunctions & Instance();
   static void ValidateAndClear();
 
-  //VAO
+  // VAO
   MOCK_METHOD0(glGenVertexArray, uint32_t());
   MOCK_METHOD1(glBindVertexArray, void(uint32_t vao));
   MOCK_METHOD1(glDeleteVertexArray, void(uint32_t vao));
@@ -27,6 +27,7 @@ public:
   MOCK_METHOD1(glDeleteBuffer, void(uint32_t vbo));
   MOCK_METHOD4(glBufferData, void(glConst target, uint32_t size, void const * data, glConst usage));
   MOCK_METHOD4(glBufferSubData, void(glConst target, uint32_t size, void const * data, uint32_t offset));
+  MOCK_METHOD2(glGetBufferParameter, int32_t(glConst target, glConst name));
 
   MOCK_METHOD2(glGetUniformLocation, int8_t(uint32_t programID, string const & name));
   MOCK_METHOD2(glUniformValuei, void(int8_t location, int32_t v));
@@ -70,7 +71,7 @@ public:
                                         int32_t*, glConst *,
                                         string &));
 
-  //Texture functions
+  // Texture functions
   MOCK_METHOD1(glActiveTexture, void(glConst));
   MOCK_METHOD0(glGenTexture, uint32_t());
   MOCK_METHOD1(glDeleteTexture, void(uint32_t));
@@ -80,6 +81,19 @@ public:
   MOCK_METHOD2(glTexParameter, void(glConst, glConst));
 
   MOCK_METHOD1(glGetInteger, int32_t(glConst));
+  MOCK_METHOD1(glGetString, string(glConst));
+  MOCK_METHOD0(glGetMaxLineWidth, int32_t());
+
+  MOCK_METHOD1(glLineWidth, void(uint32_t value));
+  MOCK_METHOD4(glViewport, void(uint32_t x, uint32_t y, uint32_t w, uint32_t h));
+  MOCK_METHOD4(glScissor, void(uint32_t x, uint32_t y, uint32_t w, uint32_t h));
+
+  // FBO
+  MOCK_METHOD1(glGenFramebuffer, void(uint32_t * fbo));
+  MOCK_METHOD1(glBindFramebuffer, void(uint32_t fbo));
+  MOCK_METHOD1(glDeleteFramebuffer, void(uint32_t * fbo));
+  MOCK_METHOD2(glFramebufferTexture2D, void(glConst attachment, glConst texture));
+  MOCK_METHOD0(glCheckFramebufferStatus, uint32_t());
 
 private:
   static GLMockFunctions * m_mock;

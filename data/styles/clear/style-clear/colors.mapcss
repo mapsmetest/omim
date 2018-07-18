@@ -1,167 +1,177 @@
-/* BASE */
+/* ~~~~ CONTENT OF COLORS-DAY ~~~~~
+
+1.BASEMAP
+2.BOUNDARY
+3.NATURAL
+	3.1 Main natural
+	3.2 Vegetation
+4.LANDUSE
+	4.1 Main landuse
+	4.2 Aerodrome
+  4.3 Barriers
+  4.4 Buildings
+5.ROADS
+  5.1 All roads
+	5.2 Bridges
+  5.3 Tunnels
+  5.4 Piste
+  5.5 Transport
+ 6.LABELS COLORS
+  6.1 Main labels
+  6.2 Natural labels
+  6.3 Place labels
+  6.4 Road labels
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
+
+/* 1.BASEMAP */
+
 @white: #ffffff;
-@background: #DDDDCC; /* #EDEAE1;	/* @background: #f1eee8; */
-@backgroundone: #DEDECD;
+@background: #E3E1D2;
 
-/* BOUNDARIES */
-@border_country: #73736D;
-@border_country_light: #73736D;
-@border_region: #73736D;
+/* 2.BOUNDARY */
 
+@border_country: #63635C;
+@border_region: #73726B;
 
-/* ROADS */
+/* 3.NATURAL */
+/* 3.1 Main natural */
+
+@glacier: #FFFFFF;
+@water: #8BD3E0;
+@river: #36B0BF;
+@wetland: #c9ddd6;
+@beach: #FCEC7E;
+
+/*3.2 Vegeration*/
+
+@forest: #AABF65;
+@green0: #CFD5A8;
+@green1: #C6CF93;
+@green2: #BCC87E;
+@green3: #B3C471;
+@green4: #AEC26B;
+@green5: #B0C270;
+@green6: #9EB360;
+
+/* 4.LANDUSE */
+/*4.1 Main landuse*/
+
+@pedestrian_area: #EDE8D6;
+@pedestrian_area_light: #F2EEDA;
+@university: #F8E4BA;
+@hospital: #F8D9D9;
+@industrial: #E4E2EB;
+@sport: #D1CDA7;
+@parking: #F2F2CE;
+@military: #E53935;
+
+/*4.2 Aerodrome*/
+
+@aerodrome0: #D4BFF2;
+@aerodrome1: #D4BFF2;
+@aerodrome2: #D1C0EB;
+@aerodrome3: #CFC1E8;
+@aerodrome4: #CDC0E3;
+@aerodrome5: #C8BCDE;
+
+/* 4.3 Barriers */
+@fence: #999999;
+
+/* 4.4 Buildings */
+
+@building: #C9C8BB;
+@building_dark: #C2C0B3;
+@building_border: #A1A096;
+@building_dark_border: #9B9A8F;
+
+/* 5.ROADS */
+/* 5.1 All roads */
+
 @trunk: #FF8800;
-@trunk_hard: #F7632C;
-@trunk_medium: #F86B39;
-@trunk_light: #F87C4A;
-@primary:  #E5B643;
-
-/* YELLOW ROADS BUNDLE  */
-@primary_yellow: #FCD767;
-@primary_yellow_case: #E5A643;
-@trunk_yellow: #FF8800;
-@trunk_yellow_case: #CD764C;
-
-/* ORANGE ROADS BUNDLE  */
-@trunk_orange: #FF5102;
-@trunk_orange_hard: #F7632C;
-@trunk_orange_medium: #F86B39;
-@trunk_orange_light: #F87C4A;
-@trunk_orange_case: #DDDDCC;
-@primary_orange:  #FF864E;
-@primary_orange_medium: #FC9757;
-@primary_orange_light: #FCA462;
-@primary_orange_case: #DDDDCC;
-@trunk_tunnel_orange: #FF8800;
-
-@primary_medium: #FCE757;
-@primary_light: #FCD757;
+@trunk_orange: #FF5919;
+@trunk_orange_medium: #FF7326;
+@trunk_orange_light: #FF7A26;
+@primary_orange:  #FF8726;
+@primary_orange_medium: #FF9440;
+@primary_orange_light: #FFA14C;
 @secondary: #FFFFFF;
 @residential: #F8F8F8;
-@tertiary: #F8F8F8;
 @unclassified: #F8F8F8;
 @pedestrian: #F8F8F8;
 @footway: #F8F8F8;
 @cycleway: #FF87AD;
-@steps: #FFFFFF;
 @construction: #BBBBAA;
-@track: #887744;/*888844*/
-@bridleway: #887744;
+@track: #635730;
+@bridleway: #3D361E;
 
+/* 5.2 Bridges */
 
-
-/* bridges */
-@bridge_background: #EEEEDD;
+@bridge_background: #EDEBDB;
 @bridge_casing: #808080;
 
-/* tunnels */
+/* 5.3 Tunnels */
 
-@primary_tunnel_orange: #FCA462;
-@primary_tunnel_yellow: #FCD767;
 @trunk_tunnel_orange: #FCA462;
-@trunk_tunnel_yellow: #FF8800;
-@primary_tunnel_casing: #808080;
 @trunk_tunnel_casing: #808080;
+@primary_tunnel_orange: #FCA462;
+@primary_tunnel_casing: #808080;
 @secondary_tunnel: #FFFFFF;
 @secondary_tunnel_casing:  #808080;
 @tertiary_tunnel: #FFFFFF;
 @tertiary_tunnel_casing:  #808080;
 @unclassified_tunnel: #FFFFFF;
 @unclassified_tunnel_casing: #808080;
-/*roads_links */
-@trunk_link: #FFFFFF;
-@primary_link: #FFFFFF;
-@secondary_link: #FFFFFF;
-@tertiary_link: #f8f8f8;
 
+/* 5.4 Piste */
 
-/* TRANSPORT */
-@railway_light: #BBBBAA;
-@railway: #999988;
+@piste: #C47AFF;
+@piste_novice:#5feb2e;
+@piste_easy: #0b27fb;
+@piste_intermadiate: #fc0e1b;
+@piste_expert: #220625;
+@piste_advanced: #0a0a0d;
+
+/* 5.5 Transport */
+
+@railway_light: #B2B1A2;
+@railway: #969586;
 @railway_dash: #EEEEEE;
-@railway_tunnel: #555555;
-@aerialway: #777777;
-@tram: #555555;
+@railway_tunnel: #808080;
+@aerialway: #444444;
+@tram: #7A7A7A;
 @ferry: #4499Bb;
-@aerodrome: #C1B1E1;
 
-/* NATURAL */
-@glacier: #FFFFFF;
-@water: #83C6D2;
-@river: #65A4C3;
-@forest: #AABB66;
-@park: #AABB66; /*  #A4B275 #BCCC74*/
-@beach: #FAEE99;
-
-/* BUILDINGS */
-@housename: #7F7F7F;
-@building: #CCCCBE;
-@building_dark: #BBBBAA;
-
-/* LANDUSE */
-@pedestrian_area: #FFFFFF;
-@unversity: #DDCCAA;
-@hospital: #FFAAAA;
-@industrial: #D1D1D1;
-@sport: #CCCCAA;
-
-/* BARRIERS */
-@fence: #BBBBAA;
-
-/* LABELS COLORS */
-@label_extra_dark: #000000;
+/* 6.LABELS COLORS */
+/* 6.1 Main labels */
 @label_dark: #222222;
 @label_medium: #333333;
 @label_light: #444444;
-@label_extra_light: #7F7F7F;
-
-@label_halo_bg: #DDDDCC;
-@label_halo_dark: #DDDDCC;
-@label_halo_medium: #EEEEDD;
+@label_halo_medium: #EDEBDB;
 @label_halo_light: #FFFFFF;
 
+/* 6.2 Natural labels */
 
-/* PLACE LABELS */
-@city_label: #595959;
-@city_label_light: #7F7F7F;
-@city_halo: #DDDDCC;
-@city_halo_light: #DDDDCC;
-@country_label: #8C8C8C;
-@state_name: #8C8C8C;
-@district_label: #7F7F7F;
-
-@poi_label: #444444;
-@subway_label: #333333;
-@railway_label: #333333;
-
-/* ROADS LABELS */
-@primary_road_label: #2E2E2E;
-@secondary_road_label: #333333;
-@road_label_halo: #FFFFFF;
-@shield: #fff;
-@shield_halo: #498F46;
-/* blue - #2E89B0; #498F46; #598DBE; */
-
-@label_dark: #333333;
-@label_light: #444444;
-@dark:  #333333;
-
-/* NATURAL LABELS */
 @water_label: #4499Bb;
 @park_label: #3A7921;
-@halo_park_lable: #fff;
-@halo_water_lable: #fff;
+@halo_park_label: #FFFFFF;
 
-/* UNIVERSAL HALO */
-@label_halo: #FFFFFF;
+/* 6.3 Place labels */
 
-/* OTHER LABELS */
-@building_label: #7F7F7F;
+@city_label: #666666;
+@country_label: #8C8C8C;
+@state_label: #8C8C8C;
+@district_label: #7F7F7F;
+@housename: #65655E;
+@building_label: #61615A;
+@poi_label: #444444;
+@subway_label: #333333;
 
-/* PISTE */
-@piste: grey;
-@piste_novice: #40A90B;
-@piste_easy: #40A90B;
-@piste_intermadiate: #DF4741;
-@piste_expert: #333333;
-@piste_advanced: #333333;
+/* 6.4 Road labels */
+
+@road_label_halo: #FFFFFF;
+@shield_text: #000000;
+@shield_text_halo: #000000;
+@shield: #FFFFFF;
+@shield_outline: #000000;
+/* blue - #2E89B0; #687E94; #598DBE; */

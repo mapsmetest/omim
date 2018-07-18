@@ -1,9 +1,13 @@
 #pragma once
 
 #include "drape_frontend/message.hpp"
-#include "drape_frontend/tile_info.hpp"
+#include "drape_frontend/tile_key.hpp"
 
 #include "drape/pointers.hpp"
+
+#include "geometry/point2d.hpp"
+
+#include "std/vector.hpp"
 
 namespace dp
 {
@@ -14,34 +18,88 @@ namespace dp
 namespace df
 {
 
+enum MapShapeType
+{
+  GeometryType = 0,
+  OverlayType,
+
+  MapShapeTypeCount
+};
+
 class MapShape
 {
 public:
   virtual ~MapShape(){}
-  virtual void Draw(dp::RefPointer<dp::Batcher> batcher, dp::RefPointer<dp::TextureManager> textures) const = 0;
-};
+  virtual void Prepare(ref_ptr<dp::TextureManager> /*textures*/) const {}
+  virtual void Draw(ref_ptr<dp::Batcher> batcher, ref_ptr<dp::TextureManager> textures) const = 0;
+  virtual MapShapeType GetType() const { return MapShapeType::GeometryType; }
 
-class MapShapeReadedMessage : public Message
-{
-public:
-  MapShapeReadedMessage(TileKey const & key, dp::TransferPointer<MapShape> shape)
-    : m_key(key), m_shape(shape)
+  void SetFeatureMinZoom(int minZoom) { m_minZoom = minZoom; }
+  int GetFeatureMinZoom() const { return m_minZoom; }
+
+  static m2::PointD ConvertToLocal(m2::PointD const & basePt, m2::PointD const & tileCenter, double scalar)
   {
-    SetType(MapShapeReaded);
+    return (basePt - tileCenter) * scalar;
   }
-
-  ~MapShapeReadedMessage()
-  {
-    m_shape.Destroy();
-  }
-
-  TileKey const & GetKey() const { return m_key; }
-  /// return non const reference for correct construct MasterPointer
-  dp::TransferPointer<MapShape> & GetShape() { return m_shape; }
 
 private:
-  TileKey m_key;
-  dp::TransferPointer<MapShape> m_shape;
+  int m_minZoom = 0;
+};
+
+using TMapShapes = vector<drape_ptr<MapShape>>;
+
+class MapShapeMessage : public Message
+{
+public:
+  MapShapeMessage(TileKey const & key)
+    : m_tileKey(key)
+  {}
+
+  TileKey const & GetKey() const { return m_tileKey; }
+
+private:
+  TileKey m_tileKey;
+};
+
+class TileReadStartMessage : public MapShapeMessage
+{
+public:
+  TileReadStartMessage(TileKey const & key) : MapShapeMessage(key) {}
+  Type GetType() const override { return Message::TileReadStarted; }
+  bool IsGLContextDependent() const override { return true; }
+};
+
+class TileReadEndMessage : public MapShapeMessage
+{
+public:
+  TileReadEndMessage(TileKey const & key) : MapShapeMessage(key) {}
+  Type GetType() const override { return Message::TileReadEnded; }
+  bool IsGLContextDependent() const override { return true; }
+};
+
+class MapShapeReadedMessage : public MapShapeMessage
+{
+public:
+  MapShapeReadedMessage(TileKey const & key, TMapShapes && shapes)
+    : MapShapeMessage(key), m_shapes(move(shapes))
+  {}
+
+  Type GetType() const override { return Message::MapShapeReaded; }
+  bool IsGLContextDependent() const override { return true; }
+  TMapShapes const & GetShapes() { return m_shapes; }
+
+private:
+  TMapShapes m_shapes;
+};
+
+class OverlayMapShapeReadedMessage : public MapShapeReadedMessage
+{
+public:
+  OverlayMapShapeReadedMessage(TileKey const & key, TMapShapes && shapes)
+    : MapShapeReadedMessage(key, move(shapes))
+  {}
+
+  Type GetType() const override { return Message::OverlayMapShapeReaded; }
 };
 
 } // namespace df

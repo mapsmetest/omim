@@ -3,25 +3,17 @@
 #include "base/exception.hpp"
 
 #include "std/target_os.hpp"
-#include "std/iostream.hpp"
 
-#include <cassert>
-#include <cstdlib>
-
+#include <iostream>
 
 namespace my
 {
-  void OnAssertFailedDefault(SrcPoint const & srcPoint, string const & msg)
+  bool OnAssertFailedDefault(SrcPoint const & srcPoint, std::string const & msg)
   {
-    std::cerr << "ASSERT FAILED" << endl
-              << srcPoint.FileName() << ":" << srcPoint.Line() << endl
-              << msg << endl;
-
-#ifdef DEBUG
-    assert(false);
-#else
-    std::abort();
-#endif
+    std::cerr << "ASSERT FAILED" << std::endl
+              << srcPoint.FileName() << ":" << srcPoint.Line() << std::endl
+              << msg << std::endl;
+    return true;
   }
 
   AssertFailedFn OnAssertFailed = &OnAssertFailedDefault;

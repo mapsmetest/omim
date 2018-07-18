@@ -2,25 +2,28 @@ package com.mapswithme.util;
 
 import android.app.Activity;
 import android.content.Context;
+import android.content.ContextWrapper;
 import android.content.DialogInterface;
 import android.graphics.drawable.Drawable;
 import android.support.annotation.DrawableRes;
+import android.support.annotation.IdRes;
+import android.support.annotation.MenuRes;
 import android.support.annotation.NonNull;
 import android.support.annotation.StringRes;
 import android.support.v4.content.ContextCompat;
+import android.view.MenuItem;
+
+import java.lang.ref.WeakReference;
 
 import com.cocosw.bottomsheet.BottomSheet;
 import com.mapswithme.maps.MwmApplication;
 import com.mapswithme.maps.widget.ListShadowController;
 
-import java.lang.ref.WeakReference;
-
 public final class BottomSheetHelper
 {
-  public static class ShadowedBottomSheet extends BottomSheet
+  private static class ShadowedBottomSheet extends BottomSheet
   {
     private ListShadowController mShadowController;
-
 
     ShadowedBottomSheet(Context context, int theme)
     {
@@ -56,6 +59,8 @@ public final class BottomSheetHelper
     {
       super(context);
       setOnDismissListener(null);
+      if (ThemeUtils.isNightTheme())
+        darkTheme();
     }
 
     @Override
@@ -67,79 +72,136 @@ public final class BottomSheetHelper
     @Override
     public BottomSheet build()
     {
-      free();
-
       BottomSheet res = super.build();
-      sRef = new WeakReference<>(res);
       return res;
     }
 
     @SuppressWarnings("NullableProblems")
     @Override
-    public BottomSheet.Builder setOnDismissListener(final DialogInterface.OnDismissListener listener)
+    public Builder setOnDismissListener(final DialogInterface.OnDismissListener listener)
     {
-      return super.setOnDismissListener(new DialogInterface.OnDismissListener()
+      super.setOnDismissListener(new DialogInterface.OnDismissListener()
       {
         @Override
         public void onDismiss(DialogInterface dialog)
         {
-          free();
           if (listener != null)
             listener.onDismiss(dialog);
         }
       });
+
+      return this;
+    }
+
+    @Override
+    public Builder title(CharSequence title)
+    {
+      super.title(title);
+      return this;
+    }
+
+    @Override
+    public Builder title(@StringRes int title)
+    {
+      super.title(title);
+      return this;
+    }
+
+    @Override
+    public Builder sheet(@MenuRes int xmlRes)
+    {
+      super.sheet(xmlRes);
+      return this;
+    }
+
+    @Override
+    public Builder sheet(int id, @NonNull Drawable icon, @NonNull CharSequence text)
+    {
+      super.sheet(id, icon, text);
+      return this;
+    }
+
+    @Override
+    public Builder sheet(int id, @DrawableRes int iconRes, @StringRes int textRes)
+    {
+      super.sheet(id, iconRes, textRes);
+      return this;
+    }
+
+    @Override
+    public Builder grid()
+    {
+      super.grid();
+      return this;
+    }
+
+    @Override
+    public Builder listener(@NonNull MenuItem.OnMenuItemClickListener listener)
+    {
+      super.listener(listener);
+      return this;
+    }
+
+    public Builder tint()
+    {
+      for (int i = 0; i < getMenu().size(); i++)
+      {
+        MenuItem mi = getMenu().getItem(i);
+        Drawable icon = mi.getIcon();
+        if (icon != null)
+          mi.setIcon(Graphics.tint(context, icon));
+      }
+
+      return this;
+    }
+
+    @NonNull
+    public MenuItem getItemByIndex(int index)
+    {
+      MenuItem item = getMenu().getItem(index);
+
+      if (item == null)
+        throw new AssertionError("Can not find bottom sheet item with index: " + index);
+
+      return item;
+    }
+
+    @NonNull
+    public MenuItem getItemById(@IdRes int id)
+    {
+      MenuItem item = getMenu().findItem(id);
+
+      if (item == null)
+        throw new AssertionError("Can not find bottom sheet item with id: " + id);
+
+      return item;
     }
   }
-
-
-  private static WeakReference<BottomSheet> sRef;
-
 
   private BottomSheetHelper()
   {}
 
-  public static BottomSheet getReference()
+  public static Builder create(Activity context)
   {
-    if (sRef == null)
-      return null;
-
-    return sRef.get();
-  }
-
-  public static boolean isShowing()
-  {
-    BottomSheet bs = getReference();
-    return (bs != null && bs.isShowing());
-  }
-
-  public static void free()
-  {
-    BottomSheet ref = getReference();
-    if (ref != null)
-    {
-      if (ref.isShowing())
-        ref.dismiss();
-      sRef = null;
-    }
-  }
-
-  public static BottomSheet.Builder create(Activity context)
-  {
-    free();
     return new Builder(context);
   }
 
-  public static BottomSheet.Builder create(Activity context, @StringRes int title)
+  public static Builder create(Activity context, @StringRes int title)
   {
     return create(context).title(title);
   }
 
-  public static BottomSheet.Builder createGrid(Activity context, @StringRes int title)
+  public static Builder create(Activity context, CharSequence title)
+  {
+    return create(context).title(title);
+  }
+
+  public static Builder createGrid(Activity context, @StringRes int title)
   {
     return create(context, title).grid();
   }
 
-  public static BottomSheet.Builder sheet(BottomSheet.Builder builder, int id, @DrawableRes int iconRes, CharSequence text)
+  public static Builder sheet(Builder builder, int id, @DrawableRes int iconRes, CharSequence text)
   {
     Drawable icon = ContextCompat.getDrawable(MwmApplication.get(), iconRes);
     return builder.sheet(id, icon, text);

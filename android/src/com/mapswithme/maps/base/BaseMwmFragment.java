@@ -1,9 +1,19 @@
 package com.mapswithme.maps.base;
 
+import android.content.Context;
 import android.support.v4.app.Fragment;
 
-public class BaseMwmFragment extends Fragment
+import com.mapswithme.util.Utils;
+
+public class BaseMwmFragment extends Fragment implements OnBackPressListener
 {
+  @Override
+  public void onAttach(Context context)
+  {
+    super.onAttach(context);
+    Utils.detachFragmentIfCoreNotInitialized(context, this);
+  }
+
   @Override
   public void onResume()
   {
@@ -17,5 +27,16 @@ public class BaseMwmFragment extends Fragment
   {
     super.onPause();
     org.alohalytics.Statistics.logEvent("$onPause", this.getClass().getSimpleName());
+  }
+
+  public BaseMwmFragmentActivity getMwmActivity()
+  {
+    return Utils.castTo(getActivity());
+  }
+
+  @Override
+  public boolean onBackPressed()
+  {
+    return false;
   }
 }

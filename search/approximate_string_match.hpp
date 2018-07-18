@@ -1,7 +1,9 @@
 #pragma once
 #include "indexer/search_string_utils.hpp"
+
 #include "base/base.hpp"
 #include "base/buffer_vector.hpp"
+
 #include "std/queue.hpp"
 
 namespace search
@@ -46,8 +48,8 @@ public:
 };
 
 template <typename CharT, typename CostF>
-uint32_t StringMatchCost(CharT const * sA, uint32_t sizeA,
-                         CharT const * sB, uint32_t sizeB,
+uint32_t StringMatchCost(CharT const * sA, size_t sizeA,
+                         CharT const * sB, size_t sizeB,
                          CostF const & costF, uint32_t maxCost,
                          bool bPrefixMatch = false)
 {
@@ -60,7 +62,10 @@ uint32_t StringMatchCost(CharT const * sA, uint32_t sizeA,
     uint32_t const c = q.top().m_Cost;
     q.pop();
     while (a < sizeA && b < sizeB && sA[a] == sB[b])
-      ++a, ++b;
+    {
+      ++a;
+      ++b;
+    }
 
     if (a == sizeA && (bPrefixMatch || b == sizeB))
       return c;

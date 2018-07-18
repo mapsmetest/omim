@@ -1,26 +1,30 @@
 #pragma once
 
-#include "generator/osm_id.hpp"
-
 #include "indexer/feature.hpp"
 
 #include "coding/file_reader.hpp"
 #include "coding/read_write_utils.hpp"
 
-#include "std/bind.hpp"
+#include "base/osm_id.hpp"
 
+#include <functional>
+#include <list>
+#include <string>
 
-namespace serial { class CodingParams; }
+namespace serial
+{
+class GeometryCodingParams;
+}  // namespace serial
 
 /// Used for serialization\deserialization of features during --generate_features.
 class FeatureBuilder1
 {
   /// For debugging
-  friend string DebugPrint(FeatureBuilder1 const & f);
+  friend std::string DebugPrint(FeatureBuilder1 const & f);
 
 public:
   using TPointSeq = vector<m2::PointD>;
-  using TGeometry = list<TPointSeq>;
+  using TGeometry = std::list<TPointSeq>;
 
   using TBuffer = vector<char>;
 
@@ -30,6 +34,14 @@ public:
   //@{
   /// Set center (origin) point of feature and set that feature is point.
   void SetCenter(m2::PointD const & p);
+
+  void SetRank(uint8_t rank);
+
+  void AddHouseNumber(std::string const & houseNumber);
+
+  void AddStreet(std::string const & streetName);
+
+  void AddPostcode(std::string const & postcode);
 
   /// Add point to geometry.
   void AddPoint(m2::PointD const & p);
@@ -45,9 +57,13 @@ public:
   inline bool IsArea() const { return (GetGeomType() == feature::GEOM_AREA); }
 
   void AddPolygon(vector<m2::PointD> & poly);
+
+  void ResetGeometry();
   //@}
 
+
   inline feature::Metadata const & GetMetadata() const { return m_params.GetMetadata(); }
+  inline feature::Metadata & GetMetadataForTesting() { return m_params.GetMetadata(); }
   inline TGeometry const & GetGeometry() const { return m_polygons; }
   inline TPointSeq const & GetOuterGeometry() const { return m_polygons.front(); }
   inline feature::EGeomType GetGeomType() const { return m_params.GetGeomType(); }
@@ -78,7 +94,9 @@ public:
   /// @name Serialization.
   //@{
   void Serialize(TBuffer & data) const;
-  void SerializeBase(TBuffer & data, serial::CodingParams const & params, bool needSearializeAdditionalInfo = true) const;
+  void SerializeBase(TBuffer & data, serial::GeometryCodingParams const & params,
+                     bool saveAddInfo) const;
+  void SerializeBorder(serial::GeometryCodingParams const & params, TBuffer & data) const;
 
   void Deserialize(TBuffer & data);
   //@}
@@ -87,7 +105,7 @@ public:
   //@{
   inline m2::RectD GetLimitRect() const { return m_limitRect; }
 
-  bool FormatFullAddress(string & res) const;
+  bool FormatFullAddress(std::string & res) const;
 
   /// Get common parameters of feature.
   FeatureBase GetFeatureBase() const;
@@ -148,36 +166,30 @@ public:
 
   inline FeatureParams const & GetParams() const { return m_params; }
 
-  /// @name For OSM debugging, store original OSM id
+  /// @name For OSM debugging and osm objects replacement, store original OSM id
   //@{
   void AddOsmId(osm::Id id);
   void SetOsmId(osm::Id id);
+  osm::Id GetFirstOsmId() const;
   osm::Id GetLastOsmId() const;
-  string GetOsmIdsString() const;
+  /// @returns an id of the most general element: node's one if there is no area or relation,
+  /// area's one if there is no relation, and relation id otherwise.
+  osm::Id GetMostGenericOsmId() const;
+  bool HasOsmId(osm::Id const & id) const;
+  vector<osm::Id> const & GetOsmIds() const { return m_osmIds; }
   //@}
 
   uint64_t GetWayIDForRouting() const;
 
-
-  bool AddName(string const & lang, string const & name);
-
   int GetMinFeatureDrawScale() const;
-
   bool IsDrawableInRange(int lowScale, int highScale) const;
 
-  void SetCoastCell(int64_t iCell, string const & strCell);
+  void SetCoastCell(int64_t iCell) { m_coastCell = iCell; }
   inline bool IsCoastCell() const { return (m_coastCell != -1); }
-  inline bool GetCoastCell(int64_t & cell) const
-  {
-    if (m_coastCell != -1)
-    {
-      cell = m_coastCell;
-      return true;
-    }
-    else return false;
-  }
 
-  string GetName(int8_t lang = StringUtf8Multilang::DEFAULT_CODE) const;
+  bool AddName(std::string const & lang, std::string const & name);
+  std::string GetName(int8_t lang = StringUtf8Multilang::kDefaultCode) const;
+
   uint8_t GetRank() const { return m_params.rank; }
 
   /// @name For diagnostic use only.
@@ -218,8 +230,10 @@ class FeatureBuilder2 : public FeatureBuilder1
 
   static void SerializeOffsets(uint32_t mask, TOffsets const & offsets, TBuffer & buffer);
 
-public:
+  /// For debugging
+  friend std::string DebugPrint(FeatureBuilder2 const & f);
 
+public:
   struct SupportingData
   {
     /// @name input
@@ -244,8 +258,13 @@ public:
   /// @name Overwrite from base_type.
   //@{
   bool PreSerialize(SupportingData const & data);
-  void Serialize(SupportingData & data, serial::CodingParams const & params);
+  bool IsLocalityObject() const;
+  void SerializeLocalityObject(serial::GeometryCodingParams const & params,
+                               SupportingData & data) const;
+  void Serialize(SupportingData & data, serial::GeometryCodingParams const & params) const;
   //@}
+
+  feature::AddressData const & GetAddressData() const { return m_params.GetAddressData(); }
 };
 
 namespace feature
@@ -262,7 +281,7 @@ namespace feature
 
   /// Process features in .dat file.
   template <class ToDo>
-  void ForEachFromDatRawFormat(string const & fName, ToDo && toDo)
+  void ForEachFromDatRawFormat(std::string const & fName, ToDo && toDo)
   {
     FileReader reader(fName);
     ReaderSource<FileReader> src(reader);

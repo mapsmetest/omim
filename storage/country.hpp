@@ -1,7 +1,8 @@
 #pragma once
 
 #include "storage/country_decl.hpp"
-#include "storage/simple_tree.hpp"
+#include "storage/country_tree.hpp"
+#include "storage/index.hpp"
 #include "storage/storage_defines.hpp"
 
 #include "platform/local_country_file.hpp"
@@ -12,10 +13,11 @@
 
 #include "geometry/rect2d.hpp"
 
-#include "base/buffer_vector.hpp"
-
-#include "std/string.hpp"
-#include "std/vector.hpp"
+#include <cstdint>
+#include <map>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace update
 {
@@ -24,49 +26,70 @@ class SizeUpdater;
 
 namespace storage
 {
-/// Serves as a proxy between GUI and downloaded files
+using TMappingOldMwm = std::map<TCountryId, TCountriesSet>;
+/// Map from key affiliation words into MWM IDs (file names).
+using TMappingAffiliations = std::unordered_map<string, vector<TCountryId>>;
+
+/// This class keeps all the information about a country in country tree (TCountryTree).
+/// It is guaranteed that every node represent a unique region has a unique |m_name| in country
+/// tree.
+/// If several nodes have the same |m_name| they represent the same region.
+/// It happends in case of disputed territories.
+/// That means that
+/// * if several leaf nodes have the same |m_name| one mwm file corresponds
+/// to all of them
+/// * if several expandable (not leaf) nodes have the same |m_name|
+/// the same hierarchy, the same set of mwm files and the same attributes correspond to all of them.
+/// So in most cases it's enough to find the first inclusion of |Country| in country tree.
 class Country
 {
   friend class update::SizeUpdater;
-  /// Name in the country node tree
-  string m_name;
-  /// Flag to display
-  string m_flag;
-  /// stores squares with world pieces which are part of the country
-  buffer_vector<platform::CountryFile, 1> m_files;
+  /// Name in the country node tree. In single mwm case it's a country id.
+  TCountryId m_name;
+  /// Country id of parent of m_name in country tree. m_parent == kInvalidCountryId for the root.
+  TCountryId m_parent;
+  /// |m_file| is a CountryFile of mwm with id == |m_name|.
+  /// if |m_name| is node id of a group of mwms, |m_file| is empty.
+  platform::CountryFile m_file;
+  /// The number of descendant mwm files of |m_name|. Only files (leaves in tree) are counted.
+  /// If |m_name| is a mwm file name |m_childrenNumber| == 1.
+  TMwmCounter m_subtreeMwmNumber;
+  /// Size of descendant mwm files of |m_name|.
+  /// If |m_name| is a mwm file name |m_subtreeMwmSizeBytes| is equal to size of the mwm.
+  TMwmSize m_subtreeMwmSizeBytes;
 
 public:
-  Country() {}
-  Country(string const & name, string const & flag = "") : m_name(name), m_flag(flag) {}
+  Country() = default;
+  explicit Country(TCountryId const & name, TCountryId const & parent = kInvalidCountryId)
+    : m_name(name), m_parent(parent) {}
 
-  bool operator<(Country const & other) const { return Name() < other.Name(); }
-
-  void AddFile(platform::CountryFile const & file);
-
-  size_t GetFilesCount() const { return m_files.size(); }
+  void SetFile(platform::CountryFile const & file) { m_file = file; }
+  void SetSubtreeAttrs(TMwmCounter subtreeMwmNumber, TMwmSize subtreeMwmSizeBytes)
+  {
+    m_subtreeMwmNumber = subtreeMwmNumber;
+    m_subtreeMwmSizeBytes = subtreeMwmSizeBytes;
+  }
+  TMwmCounter GetSubtreeMwmCounter() const { return m_subtreeMwmNumber; }
+  TMwmSize GetSubtreeMwmSizeBytes() const { return m_subtreeMwmSizeBytes; }
+  TCountryId GetParent() const { return m_parent; }
 
   /// This function valid for current logic - one file for one country (region).
   /// If the logic will be changed, replace GetFile with ForEachFile.
-  platform::CountryFile const & GetFile() const
-  {
-    ASSERT_EQUAL(m_files.size(), 1, (m_name));
-    return m_files.front();
-  }
-
-  string const & Name() const { return m_name; }
-  string const & Flag() const { return m_flag; }
-
-  uint64_t Size(MapOptions opt) const;
+  platform::CountryFile const & GetFile() const { return m_file; }
+  TCountryId const & Name() const { return m_name; }
 };
 
-typedef SimpleTree<Country> CountriesContainerT;
+using TCountryTree = CountryTree<TCountryId, Country>;
+using TCountryTreeNode = TCountryTree::Node;
 
 /// @return version of country file or -1 if error was encountered
-int64_t LoadCountries(string const & jsonBuffer, CountriesContainerT & countries);
+int64_t LoadCountriesFromBuffer(std::string const & buffer, TCountryTree & countries,
+                                TMappingAffiliations & affiliations,
+                                TMappingOldMwm * mapping = nullptr);
+int64_t LoadCountriesFromFile(std::string const & path, TCountryTree & countries,
+                              TMappingAffiliations & affiliations,
+                              TMappingOldMwm * mapping = nullptr);
 
-void LoadCountryFile2CountryInfo(string const & jsonBuffer, map<string, CountryInfo> & id2info);
-
-void LoadCountryCode2File(string const & jsonBuffer, multimap<string, string> & code2file);
-
-bool SaveCountries(int64_t version, CountriesContainerT const & countries, string & jsonBuffer);
+void LoadCountryFile2CountryInfo(std::string const & jsonBuffer,
+                                 std::map<std::string, CountryInfo> & id2info, bool & isSingleMwm);
 }  // namespace storage

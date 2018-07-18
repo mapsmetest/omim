@@ -1,10 +1,6 @@
-#include "base/SRC_FIRST.hpp"
-
 #include "indexer/feature_loader_base.hpp"
 #include "indexer/feature_loader.hpp"
 #include "indexer/feature_impl.hpp"
-
-#include "indexer/old/feature_loader_101.hpp"
 
 #include "defines.hpp"
 
@@ -26,40 +22,43 @@ SharedLoadInfo::SharedLoadInfo(FilesContainerR const & cont, DataHeader const & 
 
 SharedLoadInfo::~SharedLoadInfo()
 {
-  delete m_pLoader;
+  delete m_loader;
 }
 
-SharedLoadInfo::ReaderT SharedLoadInfo::GetDataReader() const
+SharedLoadInfo::TReader SharedLoadInfo::GetDataReader() const
 {
   return m_cont.GetReader(DATA_FILE_TAG);
 }
 
-SharedLoadInfo::ReaderT SharedLoadInfo::GetMetadataReader() const
+SharedLoadInfo::TReader SharedLoadInfo::GetMetadataReader() const
 {
   return m_cont.GetReader(METADATA_FILE_TAG);
 }
 
-SharedLoadInfo::ReaderT SharedLoadInfo::GetMetadataIndexReader() const
+SharedLoadInfo::TReader SharedLoadInfo::GetMetadataIndexReader() const
 {
   return m_cont.GetReader(METADATA_INDEX_FILE_TAG);
 }
 
-SharedLoadInfo::ReaderT SharedLoadInfo::GetGeometryReader(int ind) const
+SharedLoadInfo::TReader SharedLoadInfo::GetAltitudeReader() const
+{
+  return m_cont.GetReader(ALTITUDES_FILE_TAG);
+}
+
+SharedLoadInfo::TReader SharedLoadInfo::GetGeometryReader(int ind) const
 {
   return m_cont.GetReader(GetTagForIndex(GEOMETRY_FILE_TAG, ind));
 }
 
-SharedLoadInfo::ReaderT SharedLoadInfo::GetTrianglesReader(int ind) const
+SharedLoadInfo::TReader SharedLoadInfo::GetTrianglesReader(int ind) const
 {
   return m_cont.GetReader(GetTagForIndex(TRIANGLE_FILE_TAG, ind));
 }
 
 void SharedLoadInfo::CreateLoader()
 {
-  if (m_header.GetFormat() == version::v1)
-    m_pLoader = new old_101::feature::LoaderImpl(*this);
-  else
-    m_pLoader = new LoaderCurrent(*this);
+  CHECK_NOT_EQUAL(m_header.GetFormat(), version::Format::v1, ("Old maps format is not supported"));
+  m_loader = new LoaderCurrent(*this);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////
@@ -71,7 +70,7 @@ LoaderBase::LoaderBase(SharedLoadInfo const & info)
 {
 }
 
-void LoaderBase::Init(BufferT data)
+void LoaderBase::Init(TBuffer data)
 {
   m_Data = data;
   m_pF = 0;

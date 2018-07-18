@@ -2,142 +2,370 @@ package com.mapswithme.maps;
 
 import android.app.Activity;
 import android.content.DialogInterface;
+import android.graphics.Rect;
 import android.os.Bundle;
+import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.v7.app.AlertDialog;
+import android.util.DisplayMetrics;
 import android.view.LayoutInflater;
+import android.view.MotionEvent;
+import android.view.Surface;
+import android.view.SurfaceHolder;
+import android.view.SurfaceView;
 import android.view.View;
 import android.view.ViewGroup;
-import com.mapswithme.maps.downloader.DownloadHelper;
-import com.mapswithme.util.UiUtils;
-import com.nvidia.devtech.NvEventQueueFragment;
 
-public class MapFragment extends NvEventQueueFragment
+import com.mapswithme.maps.base.BaseMwmFragment;
+import com.mapswithme.maps.location.LocationHelper;
+import com.mapswithme.util.Config;
+import com.mapswithme.util.UiUtils;
+import com.mapswithme.util.concurrency.UiThread;
+import com.mapswithme.util.log.Logger;
+import com.mapswithme.util.log.LoggerFactory;
+
+public class MapFragment extends BaseMwmFragment
+                      implements View.OnTouchListener,
+                                 SurfaceHolder.Callback
 {
-  public interface MapRenderingListener
+  public static final String ARG_LAUNCH_BY_DEEP_LINK = "launch_by_deep_link";
+  private static final Logger LOGGER = LoggerFactory.INSTANCE.getLogger(LoggerFactory.Type.MISC);
+  private static final String TAG = MapFragment.class.getSimpleName();
+
+  // Should correspond to android::MultiTouchAction from Framework.cpp
+  private static final int NATIVE_ACTION_UP = 0x01;
+  private static final int NATIVE_ACTION_DOWN = 0x02;
+  private static final int NATIVE_ACTION_MOVE = 0x03;
+  private static final int NATIVE_ACTION_CANCEL = 0x04;
+
+  // Should correspond to gui::EWidget from skin.hpp
+  private static final int WIDGET_RULER = 0x01;
+  private static final int WIDGET_COMPASS = 0x02;
+  private static final int WIDGET_COPYRIGHT = 0x04;
+  private static final int WIDGET_SCALE_LABEL = 0x08;
+  private static final int WIDGET_WATERMARK = 0x10;
+
+  // Should correspond to dp::Anchor from drape_global.hpp
+  private static final int ANCHOR_CENTER = 0x00;
+  private static final int ANCHOR_LEFT = 0x01;
+  private static final int ANCHOR_RIGHT = (ANCHOR_LEFT << 1);
+  private static final int ANCHOR_TOP = (ANCHOR_RIGHT << 1);
+  private static final int ANCHOR_BOTTOM = (ANCHOR_TOP << 1);
+  private static final int ANCHOR_LEFT_TOP = (ANCHOR_LEFT | ANCHOR_TOP);
+  private static final int ANCHOR_RIGHT_TOP = (ANCHOR_RIGHT | ANCHOR_TOP);
+  private static final int ANCHOR_LEFT_BOTTOM = (ANCHOR_LEFT | ANCHOR_BOTTOM);
+  private static final int ANCHOR_RIGHT_BOTTOM = (ANCHOR_RIGHT | ANCHOR_BOTTOM);
+
+  // Should correspond to df::TouchEvent::INVALID_MASKED_POINTER from user_event_stream.cpp
+  private static final int INVALID_POINTER_MASK = 0xFF;
+  private static final int INVALID_TOUCH_ID = -1;
+
+  private int mHeight;
+  private int mWidth;
+  private boolean mRequireResize;
+  private boolean mContextCreated;
+  private boolean mLaunchByDeepLink;
+  private static boolean sWasCopyrightDisplayed;
+  @Nullable
+  private String mUiThemeOnPause;
+  @NonNull
+  private SurfaceView mSurfaceView;
+
+  interface MapRenderingListener
   {
     void onRenderingInitialized();
+    void onRenderingRestored();
   }
 
-  public static final String FRAGMENT_TAG = MapFragment.class.getSimpleName();
+  private void setupWidgets(int width, int height)
+  {
+    mHeight = height;
+    mWidth = width;
 
-  protected native void nativeConnectDownloadButton();
+    nativeCleanWidgets();
+    if (!sWasCopyrightDisplayed)
+    {
+      nativeSetupWidget(WIDGET_COPYRIGHT,
+                        UiUtils.dimen(R.dimen.margin_ruler_left),
+                        mHeight - UiUtils.dimen(R.dimen.margin_ruler_bottom),
+                        ANCHOR_LEFT_BOTTOM);
+      sWasCopyrightDisplayed = true;
+    }
 
-  protected native void nativeDownloadCountry(MapStorage.Index index, int options);
+    setupRuler(0, false);
+    setupWatermark(0, false);
 
-  protected native void nativeOnLocationError(int errorCode);
+    if (BuildConfig.DEBUG)
+    {
+      nativeSetupWidget(WIDGET_SCALE_LABEL,
+                        UiUtils.dimen(R.dimen.margin_base),
+                        UiUtils.dimen(R.dimen.margin_base),
+                        ANCHOR_LEFT_TOP);
+    }
 
-  protected native void nativeLocationUpdated(long time, double lat, double lon, float accuracy, double altitude, float speed, float bearing);
+    setupCompass(UiUtils.getCompassYOffset(getContext()), false);
+  }
 
-  protected native void nativeCompassUpdated(double magneticNorth, double trueNorth, boolean force);
+  void setupCompass(int offsetY, boolean forceRedraw)
+  {
+    int navPadding = UiUtils.dimen(R.dimen.nav_frame_padding);
+    int marginX = UiUtils.dimen(R.dimen.margin_compass) + navPadding;
+    int marginY = UiUtils.dimen(R.dimen.margin_compass_top) + navPadding;
+    nativeSetupWidget(WIDGET_COMPASS,
+                      mWidth - marginX,
+                      offsetY + marginY,
+                      ANCHOR_CENTER);
+    if (forceRedraw && mContextCreated)
+      nativeApplyWidgets();
+  }
 
-  protected native void nativeScale(double k);
+  void setupRuler(int offsetY, boolean forceRedraw)
+  {
+    nativeSetupWidget(WIDGET_RULER,
+                      UiUtils.dimen(R.dimen.margin_ruler_left),
+                      mHeight - UiUtils.dimen(R.dimen.margin_ruler_bottom) + offsetY,
+                      ANCHOR_LEFT_BOTTOM);
+    if (forceRedraw && mContextCreated)
+      nativeApplyWidgets();
+  }
 
-  public native boolean showMapForUrl(String url);
+  void setupWatermark(int offsetY, boolean forceRedraw)
+  {
+    nativeSetupWidget(WIDGET_WATERMARK,
+                      mWidth - UiUtils.dimen(R.dimen.margin_watermark_right),
+                      mHeight - UiUtils.dimen(R.dimen.margin_watermark_bottom) + offsetY,
+                      ANCHOR_RIGHT_BOTTOM);
+    if (forceRedraw && mContextCreated)
+      nativeApplyWidgets();
+  }
+
+  private void onRenderingInitialized()
+  {
+    final Activity activity = getActivity();
+    if (isAdded() && activity instanceof MapRenderingListener)
+      ((MapRenderingListener) activity).onRenderingInitialized();
+  }
+
+  private void onRenderingRestored()
+  {
+    final Activity activity = getActivity();
+    if (isAdded() && activity instanceof MapRenderingListener)
+      ((MapRenderingListener) activity).onRenderingRestored();
+  }
+
+  private void reportUnsupported()
+  {
+    new AlertDialog.Builder(getActivity())
+        .setMessage(getString(R.string.unsupported_phone))
+        .setCancelable(false)
+        .setPositiveButton(getString(R.string.close), new DialogInterface.OnClickListener()
+        {
+          @Override
+          public void onClick(DialogInterface dlg, int which)
+          {
+            getActivity().moveTaskToBack(true);
+          }
+        }).show();
+  }
 
   @Override
-  public void onCreate(Bundle savedInstanceState)
+  public void surfaceCreated(SurfaceHolder surfaceHolder)
   {
-    super.onCreate(savedInstanceState);
+    if (isThemeChangingProcess())
+    {
+      LOGGER.d(TAG, "Activity is being recreated due theme changing, skip 'surfaceCreated' callback");
+      return;
+    }
+
+    LOGGER.d(TAG, "surfaceCreated, mContextCreated = " + mContextCreated);
+    final Surface surface = surfaceHolder.getSurface();
+    if (nativeIsEngineCreated())
+    {
+      if (!nativeAttachSurface(surface))
+      {
+        reportUnsupported();
+        return;
+      }
+      mContextCreated = true;
+      mRequireResize = true;
+      return;
+    }
+
+    mRequireResize = false;
+    final Rect rect = surfaceHolder.getSurfaceFrame();
+    setupWidgets(rect.width(), rect.height());
+
+    final DisplayMetrics metrics = new DisplayMetrics();
+    getActivity().getWindowManager().getDefaultDisplay().getMetrics(metrics);
+    final float exactDensityDpi = metrics.densityDpi;
+
+    final boolean firstStart = SplashActivity.isFirstStart();
+    if (!nativeCreateEngine(surface, (int) exactDensityDpi, firstStart, mLaunchByDeepLink))
+    {
+      reportUnsupported();
+      return;
+    }
+
+    if (firstStart)
+    {
+      UiThread.runLater(new Runnable()
+      {
+        @Override
+        public void run()
+        {
+          LocationHelper.INSTANCE.onExitFromFirstRun();
+        }
+      });
+    }
+
+    mContextCreated = true;
+    onRenderingInitialized();
+  }
+
+  @Override
+  public void surfaceChanged(SurfaceHolder surfaceHolder, int format, int width, int height)
+  {
+    if (isThemeChangingProcess())
+    {
+      LOGGER.d(TAG, "Activity is being recreated due theme changing, skip 'surfaceChanged' callback");
+      return;
+    }
+
+    LOGGER.d(TAG, "surfaceChanged, mContextCreated = " + mContextCreated);
+    if (!mContextCreated ||
+        (!mRequireResize && surfaceHolder.isCreating()))
+      return;
+
+    nativeSurfaceChanged(width, height);
+
+    mRequireResize = false;
+    setupWidgets(width, height);
+    nativeApplyWidgets();
+    onRenderingRestored();
+  }
+
+  @Override
+  public void surfaceDestroyed(SurfaceHolder surfaceHolder)
+  {
+    LOGGER.d(TAG, "surfaceDestroyed");
+    destroyContext();
+  }
+
+  void destroyContext()
+  {
+    LOGGER.d(TAG, "destroyContext, mContextCreated = " + mContextCreated +
+                  ", isAdded = " + isAdded(), new Throwable());
+    if (!mContextCreated || !isAdded())
+      return;
+
+    nativeDetachSurface(!getActivity().isChangingConfigurations());
+    mContextCreated = false;
+  }
+
+  @Override
+  public void onCreate(Bundle b)
+  {
+    super.onCreate(b);
     setRetainInstance(true);
+    Bundle args = getArguments();
+    if (args != null)
+      mLaunchByDeepLink = args.getBoolean(ARG_LAUNCH_BY_DEEP_LINK);
+  }
+
+  @Override
+  public void onStart()
+  {
+    super.onStart();
+    LOGGER.d(TAG, "onStart");
+  }
+
+  private boolean isThemeChangingProcess()
+  {
+    return mUiThemeOnPause != null && !mUiThemeOnPause.equals(Config.getCurrentUiTheme());
+  }
+
+  @Override
+  public void onPause()
+  {
+    mUiThemeOnPause = Config.getCurrentUiTheme();
+    super.onPause();
   }
 
   @Override
   public View onCreateView(LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState)
   {
-    return inflater.inflate(R.layout.fragment_map, container, false);
+    View view = inflater.inflate(R.layout.fragment_map, container, false);
+    mSurfaceView = (SurfaceView) view.findViewById(R.id.map_surfaceview);
+    mSurfaceView.getHolder().addCallback(this);
+    return view;
   }
 
   @Override
-  public void onViewCreated(View view, @Nullable Bundle savedInstanceState)
+  public boolean onTouch(View view, MotionEvent event)
   {
-    super.onViewCreated(view, savedInstanceState);
-    nativeConnectDownloadButton();
-  }
+    final int count = event.getPointerCount();
 
-  @Override
-  protected void applyWidgetPivots()
-  {
-    Framework.setWidgetPivot(Framework.MAP_WIDGET_RULER,
-                             mSurfaceWidth - UiUtils.dimen(R.dimen.margin_ruler_right),
-                             mSurfaceHeight - UiUtils.dimen(R.dimen.margin_ruler_bottom));
-    Framework.setWidgetPivot(Framework.MAP_WIDGET_COPYRIGHT,
-                             mSurfaceWidth - UiUtils.dimen(R.dimen.margin_ruler_right),
-                             mSurfaceHeight - UiUtils.dimen(R.dimen.margin_ruler_bottom));
+    if (count == 0)
+      return false;
 
-    adjustCompass(0);
-  }
-
-  public void adjustCompass(int offset)
-  {
-    Framework.setWidgetPivot(Framework.MAP_WIDGET_COMPASS,
-                             UiUtils.dimen(R.dimen.margin_compass_left) + offset,
-                             mSurfaceHeight - UiUtils.dimen(R.dimen.margin_compass_bottom));
-  }
-
-  @Override
-  public void OnRenderingInitialized()
-  {
-    final Activity host = getActivity();
-    if (isAdded() && host instanceof MapRenderingListener)
+    int action = event.getActionMasked();
+    int pointerIndex = event.getActionIndex();
+    switch (action)
     {
-      final MapRenderingListener listener = (MapRenderingListener) host;
-      listener.onRenderingInitialized();
+      case MotionEvent.ACTION_POINTER_UP:
+        action = NATIVE_ACTION_UP;
+        break;
+      case MotionEvent.ACTION_UP:
+        action = NATIVE_ACTION_UP;
+        pointerIndex = 0;
+        break;
+      case MotionEvent.ACTION_POINTER_DOWN:
+        action = NATIVE_ACTION_DOWN;
+        break;
+      case MotionEvent.ACTION_DOWN:
+        action = NATIVE_ACTION_DOWN;
+        pointerIndex = 0;
+        break;
+      case MotionEvent.ACTION_MOVE:
+        action = NATIVE_ACTION_MOVE;
+        pointerIndex = INVALID_POINTER_MASK;
+        break;
+      case MotionEvent.ACTION_CANCEL:
+        action = NATIVE_ACTION_CANCEL;
+        break;
     }
 
-    super.OnRenderingInitialized();
+    switch (count)
+    {
+      case 1:
+        nativeOnTouch(action, event.getPointerId(0), event.getX(), event.getY(), INVALID_TOUCH_ID, 0, 0, 0);
+        return true;
+      default:
+        nativeOnTouch(action,
+                      event.getPointerId(0), event.getX(0), event.getY(0),
+                      event.getPointerId(1), event.getX(1), event.getY(1), pointerIndex);
+        return true;
+    }
   }
 
-  @Override
-  public void ReportUnsupported()
+  boolean isContextCreated()
   {
-    getActivity().runOnUiThread(new Runnable()
-    {
-      @Override
-      public void run()
-      {
-        new AlertDialog.Builder(getActivity())
-            .setMessage(getString(R.string.unsupported_phone))
-            .setCancelable(false)
-            .setPositiveButton(getString(R.string.close), new DialogInterface.OnClickListener()
-            {
-              @Override
-              public void onClick(DialogInterface dlg, int which)
-              {
-                getActivity().moveTaskToBack(true);
-                dlg.dismiss();
-              }
-            })
-            .create()
-            .show();
-      }
-    });
+    return mContextCreated;
   }
 
-  @SuppressWarnings("UnusedDeclaration")
-  public void OnDownloadCountryClicked(final int group, final int country, final int region, final int options)
-  {
-    getActivity().runOnUiThread(new Runnable()
-    {
-      @Override
-      public void run()
-      {
-        final MapStorage.Index index = new MapStorage.Index(group, country, region);
-        if (options == -1)
-          nativeDownloadCountry(index, options);
-        else
-        {
-          long size = MapStorage.INSTANCE.countryRemoteSizeInBytes(index, options);
-          DownloadHelper.downloadWithCellularCheck(getActivity(), size, MapStorage.INSTANCE.countryName(index), new DownloadHelper.OnDownloadListener()
-          {
-            @Override
-            public void onDownload()
-            {
-              nativeDownloadCountry(index, options);
-            }
-          });
-        }
-      }
-    });
-  }
+  static native void nativeCompassUpdated(double magneticNorth, double trueNorth, boolean forceRedraw);
+  static native void nativeScalePlus();
+  static native void nativeScaleMinus();
+  static native boolean nativeShowMapForUrl(String url);
+  static native boolean nativeIsEngineCreated();
+  private static native boolean nativeCreateEngine(Surface surface, int density,
+                                                   boolean firstLaunch,
+                                                   boolean isLaunchByDeepLink);
+  private static native boolean nativeAttachSurface(Surface surface);
+  private static native void nativeDetachSurface(boolean destroyContext);
+  private static native void nativeSurfaceChanged(int w, int h);
+  private static native void nativeOnTouch(int actionType, int id1, float x1, float y1, int id2, float x2, float y2, int maskedPointer);
+  private static native void nativeSetupWidget(int widget, float x, float y, int anchor);
+  private static native void nativeApplyWidgets();
+  private static native void nativeCleanWidgets();
 }

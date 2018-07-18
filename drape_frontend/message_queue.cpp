@@ -6,53 +6,147 @@
 namespace df
 {
 
+MessageQueue::MessageQueue()
+  : m_isWaiting(false)
+{
+}
+
 MessageQueue::~MessageQueue()
 {
-  CancelWait();
+  CancelWaitImpl();
   ClearQuery();
 }
 
-dp::TransferPointer<Message> MessageQueue::PopMessage(unsigned maxTimeWait)
+drape_ptr<Message> MessageQueue::PopMessage(bool waitForMessage)
 {
-  threads::ConditionGuard guard(m_condition);
+  std::unique_lock<std::mutex> lock(m_mutex);
+  if (waitForMessage && m_messages.empty() && m_lowPriorityMessages.empty())
+  {
+    m_isWaiting = true;
+    m_condition.wait(lock, [this]() { return !m_isWaiting; });
+    m_isWaiting = false;
+  }
 
-  WaitMessage(maxTimeWait);
+  if (m_messages.empty() && m_lowPriorityMessages.empty())
+    return nullptr;
 
-  /// even waitNonEmpty == true m_messages can be empty after WaitMessage call
-  /// if application preparing to close and CancelWait been called
-  if (m_messages.empty())
-    return dp::MovePointer<Message>(NULL);
+  if (!m_messages.empty())
+  {
+    drape_ptr<Message> msg = std::move(m_messages.front().first);
+    m_messages.pop_front();
+    return msg;
+  }
 
-  dp::MasterPointer<Message> msg = m_messages.front();
-  m_messages.pop_front();
-  return msg.Move();
+  drape_ptr<Message> msg = std::move(m_lowPriorityMessages.front());
+  m_lowPriorityMessages.pop_front();
+  return msg;
 }
 
-void MessageQueue::PushMessage(dp::TransferPointer<Message> message)
+void MessageQueue::PushMessage(drape_ptr<Message> && message, MessagePriority priority)
 {
-  threads::ConditionGuard guard(m_condition);
+  std::lock_guard<std::mutex> lock(m_mutex);
 
-  bool wasEmpty = m_messages.empty();
-  m_messages.push_back(dp::MasterPointer<Message>(message));
+  switch (priority)
+  {
+  case MessagePriority::Normal:
+    {
+      m_messages.emplace_back(std::move(message), priority);
+      break;
+    }
+  case MessagePriority::High:
+    {
+      auto iter = m_messages.begin();
+      while (iter != m_messages.end() && iter->second > MessagePriority::High) { iter++; }
+      m_messages.emplace(iter, std::move(message), priority);
+      break;
+    }
+  case MessagePriority::UberHighSingleton:
+    {
+      bool found = false;
+      auto iter = m_messages.begin();
+      while (iter != m_messages.end() && iter->second == MessagePriority::UberHighSingleton)
+      {
+        if (iter->first->GetType() == message->GetType())
+        {
+          found = true;
+          break;
+        }
+        iter++;
+      }
 
-  if (wasEmpty)
-    guard.Signal();
+      if (!found)
+        m_messages.emplace_front(std::move(message), priority);
+      break;
+    }
+  case MessagePriority::Low:
+    {
+      m_lowPriorityMessages.emplace_back(std::move(message));
+      break;
+    }
+  default:
+    ASSERT(false, ("Unknown message priority type"));
+  }
+
+  CancelWaitImpl();
 }
 
-void MessageQueue::WaitMessage(unsigned maxTimeWait)
+void MessageQueue::FilterMessages(TFilterMessageFn needFilterMessageFn)
 {
-  if (m_messages.empty())
-    m_condition.Wait(maxTimeWait);
+  ASSERT(needFilterMessageFn != nullptr, ());
+
+  std::lock_guard<std::mutex> lock(m_mutex);
+  for (auto it = m_messages.begin(); it != m_messages.end(); )
+  {
+    if (needFilterMessageFn(make_ref(it->first)))
+      it = m_messages.erase(it);
+    else
+      ++it;
+  }
+
+  for (auto it = m_lowPriorityMessages.begin(); it != m_lowPriorityMessages.end(); )
+  {
+    if (needFilterMessageFn(make_ref(*it)))
+      it = m_lowPriorityMessages.erase(it);
+    else
+      ++it;
+  }
 }
+
+#ifdef DEBUG_MESSAGE_QUEUE
+
+bool MessageQueue::IsEmpty() const
+{
+  lock_guard<mutex> lock(m_mutex);
+  return m_messages.empty() && m_lowPriorityMessages.empty();
+}
+
+size_t MessageQueue::GetSize() const
+{
+  lock_guard<mutex> lock(m_mutex);
+  return m_messages.size() + m_lowPriorityMessages.size();
+}
+
+#endif
 
 void MessageQueue::CancelWait()
 {
-  m_condition.Signal();
+  std::lock_guard<std::mutex> lock(m_mutex);
+  CancelWaitImpl();
+}
+
+void MessageQueue::CancelWaitImpl()
+{
+  if (m_isWaiting)
+  {
+    m_isWaiting = false;
+    m_condition.notify_all();
+  }
 }
 
 void MessageQueue::ClearQuery()
 {
-  DeleteRange(m_messages, dp::MasterPointerDeleter());
+  m_messages.clear();
+  m_lowPriorityMessages.clear();
 }
 
 } // namespace df

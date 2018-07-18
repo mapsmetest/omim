@@ -5,10 +5,16 @@ built on top of crowd-sourced OpenStreetMap data. It was publicly released
 for [iOS](https://itunes.apple.com/app/id510623322) and
 [Android](https://play.google.com/store/apps/details?id=com.mapswithme.maps.pro).
 
+![](docs/screenshots.jpg)
+
 ## Submodules
 
 This repository contains submodules. Clone it with `git clone --recursive`. If you forgot,
 run `git submodule update --init --recursive`.
+
+## Translations
+
+If you want to improve app translations or add more search synonyms, please check our [wiki](https://github.com/mapsme/omim/wiki).
 
 ## Compilation
 
@@ -19,7 +25,7 @@ and Android debug packages.
 For detailed installation instructions and Android/iOS building process,
 see [INSTALL.md](https://github.com/mapsme/omim/tree/master/docs/INSTALL.md).
 
-Nightly builds for Android and iOS are published to [osmz.ru](http://osmz.ru/mwm/)
+Nightly builds for Android are published to [osmz.ru](http://osmz.ru/mwm/)
 and Dropbox: [release](http://maps.me/release), [debug](http://maps.me/debug).
 
 ## Building maps
@@ -27,12 +33,12 @@ and Dropbox: [release](http://maps.me/release), [debug](http://maps.me/debug).
 To create one or many map files, first build the project, then use `generate_mwm.sh` script from
 `tools/unix` to create a single mwm file from pbf/o5m/bz2 source, or `generate_planet.sh`
 to generate multiple countries at once from a planet o5m file. See detailed instructions
-in [MWM.md](https://github.com/mapsme/omim/tree/master/docs/MWM.md).
+in [MAPS.md](https://github.com/mapsme/omim/tree/master/docs/MAPS.md).
 
 ## Map styles
 
 MAPS.ME uses its own binary format for map styles, `drules_proto.bin`, which is compiled from
-[MapCSS](http://wiki.openstreetmap.org/wiki/MapCSS) using modified Kothic library.
+[MapCSS](https://wiki.openstreetmap.org/wiki/MapCSS) using modified Kothic library.
 Feature set in MWM files depends on a compiled style, so make sure to rebuild maps after
 releasing a style.
 
@@ -64,6 +70,6 @@ or by mail to bugs@maps.me.
 
 ## Authors and License
 
-This source code is Copyright (C) 2011-2015 My.com B.V., published under Apache Public License 2.0,
+This source code is Copyright (C) 2015 My.com B.V. (Mail.Ru Group), published under Apache Public License 2.0,
 except third-party libraries. See [NOTICE](https://github.com/mapsme/omim/blob/master/NOTICE)
-and [copyright.html](https://github.com/mapsme/omim/blob/master/data/copyright.html) files for more information.
+and [data/copyright.html](http://htmlpreview.github.io/?https://github.com/mapsme/omim/blob/master/data/copyright.html) files for more information.

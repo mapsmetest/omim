@@ -1,58 +1,54 @@
 #pragma once
 
+#include "drape_frontend/custom_features_context.hpp"
+#include "drape_frontend/engine_context.hpp"
 #include "drape_frontend/tile_key.hpp"
-#include "drape_frontend/memory_feature_index.hpp"
 
 #include "indexer/feature_decl.hpp"
 
-#include "base/mutex.hpp"
 #include "base/exception.hpp"
+#include "base/macros.hpp"
 
-#include "std/vector.hpp"
-#include "std/noncopyable.hpp"
+#include <atomic>
+#include <set>
+#include <vector>
 
 class FeatureType;
 
 namespace df
 {
-
 class MapDataProvider;
-class EngineContext;
 class Stylist;
 
-class TileInfo : private noncopyable
+class TileInfo
 {
 public:
   DECLARE_EXCEPTION(ReadCanceledException, RootException);
 
-  TileInfo(TileKey const & key);
+  TileInfo(drape_ptr<EngineContext> && engineContext);
 
-  void ReadFeatureIndex(MapDataProvider const & model);
-  void ReadFeatures(MapDataProvider const & model,
-                    MemoryFeatureIndex & memIndex,
-                    EngineContext & context);
-  void Cancel(MemoryFeatureIndex & memIndex);
+  void ReadFeatures(MapDataProvider const & model);
+  void Cancel();
+  bool IsCancelled() const;
 
   m2::RectD GetGlobalRect() const;
-  TileKey const & GetTileKey() const { return m_key; }
-
-  bool operator <(TileInfo const & other) const { return m_key < other.m_key; }
+  TileKey const & GetTileKey() const { return m_context->GetTileKey(); }
+  bool operator <(TileInfo const & other) const { return GetTileKey() < other.GetTileKey(); }
 
 private:
-  void ProcessID(FeatureID const & id);
-  void InitStylist(FeatureType const & f, Stylist & s);
-  void RequestFeatures(MemoryFeatureIndex & memIndex, vector<size_t> & featureIndexes);
+  void ReadFeatureIndex(MapDataProvider const & model);
+  void InitStylist(int8_t deviceLang, FeatureType const & f, Stylist & s);
   void CheckCanceled() const;
   bool DoNeedReadIndex() const;
 
   int GetZoomLevel() const;
 
 private:
-  TileKey m_key;
-  vector<FeatureInfo> m_featureInfo;
+  drape_ptr<EngineContext> m_context;
+  std::vector<FeatureID> m_featureInfo;
+  std::atomic<bool> m_isCanceled;
+  std::set<MwmSet::MwmId> m_mwms;
 
-  bool m_isCanceled;
-  threads::Mutex m_mutex;
+  DISALLOW_COPY_AND_MOVE(TileInfo);
 };
-
-} // namespace df
+}  // namespace df

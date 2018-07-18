@@ -22,6 +22,8 @@ public:
 
   void GetByIndex(uint32_t index, FeatureType & ft) const;
 
+  size_t GetNumFeatures() const;
+
   template <class ToDo> void ForEach(ToDo && toDo) const
   {
     uint32_t index = 0;
@@ -29,6 +31,12 @@ public:
     {
       FeatureType ft;
       ft.Deserialize(m_LoadInfo.GetLoader(), data);
+
+      // We can't properly set MwmId here, because FeaturesVector
+      // works with FileContainerR, not with MwmId/MwmHandle/MwmValue.
+      // But it's OK to set at least feature's index, because it can
+      // be used later for Metadata loading.
+      ft.SetID(FeatureID(MwmSet::MwmId(), index));
       toDo(ft, m_table ? index++ : pos);
     });
   }
@@ -46,7 +54,7 @@ private:
   friend class FeaturesVectorTest;
 
   feature::SharedLoadInfo m_LoadInfo;
-  VarRecordReader<FilesContainerR::ReaderT, &VarRecordSizeReaderVarint> m_RecordReader;
+  VarRecordReader<FilesContainerR::TReader, &VarRecordSizeReaderVarint> m_RecordReader;
   mutable vector<char> m_buffer;
   feature::FeaturesOffsetsTable const * m_table;
 };
@@ -55,6 +63,8 @@ private:
 /// Used in generator_tool and unit tests.
 class FeaturesVectorTest
 {
+  DISALLOW_COPY(FeaturesVectorTest);
+
   FilesContainerR m_cont;
   feature::DataHeader m_header;
   FeaturesVector m_vector;

@@ -4,10 +4,11 @@
 
 namespace storage
 {
-QueuedCountry::QueuedCountry(TIndex const & index, MapOptions opt)
-    : m_index(index), m_init(opt), m_left(opt), m_current(MapOptions::Nothing)
+QueuedCountry::QueuedCountry(TCountryId const & countryId, MapOptions opt)
+    : m_countryId(countryId), m_init(opt), m_left(opt), m_current(MapOptions::Nothing)
 {
-  ASSERT(GetIndex().IsValid(), ("Only valid countries may be downloaded."));
+  // @TODO(bykoianko) Probably it's nessecary to check if InIndexInCountryTree here.
+  ASSERT(IsCountryIdValid(GetCountryId()), ("Only valid countries may be downloaded."));
   ASSERT(m_left != MapOptions::Nothing, ("Empty file set was requested for downloading."));
   SwitchToNextFile();
 }
@@ -26,7 +27,7 @@ void QueuedCountry::AddOptions(MapOptions opt)
 
 void QueuedCountry::RemoveOptions(MapOptions opt)
 {
-  for (MapOptions file : {MapOptions::Map, MapOptions::CarRouting})
+  for (MapOptions file : {MapOptions::Map, MapOptions::CarRouting, MapOptions::Diff})
   {
     if (HasOptions(opt, file) && HasOptions(m_init, file))
     {
@@ -36,6 +37,13 @@ void QueuedCountry::RemoveOptions(MapOptions opt)
   }
   if (HasOptions(opt, m_current))
     m_current = LeastSignificantOption(m_left);
+}
+
+void QueuedCountry::ResetToDefaultOptions()
+{
+  m_init = MapOptions::MapWithCarRouting;
+  m_left = MapOptions::MapWithCarRouting;
+  m_current = LeastSignificantOption(m_left);
 }
 
 bool QueuedCountry::SwitchToNextFile()

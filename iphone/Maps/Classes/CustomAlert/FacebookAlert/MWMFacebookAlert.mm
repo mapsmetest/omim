@@ -13,12 +13,15 @@ static NSString * const kFacebookAlertPreviewImage = @"http://maps.me/images/fb_
 static NSString * const kFacebookInviteEventName = @"facebookInviteEvent";
 extern NSString * const kUDAlreadySharedKey;
 
+static NSString * const kStatisticsEvent = @"Facebook Alert";
+
 @implementation MWMFacebookAlert
 
 + (MWMFacebookAlert *)alert
 {
-  [Statistics.instance logEvent:[NSString stringWithFormat:@"%@ - %@", kFacebookInviteEventName, @"open"]];
-  MWMFacebookAlert * alert = [[[NSBundle mainBundle] loadNibNamed:kFacebookAlertNibName owner:self options:nil] firstObject];
+  [Statistics logEvent:kStatisticsEvent withParameters:@{kStatAction : kStatOpen}];
+  MWMFacebookAlert * alert =
+      [NSBundle.mainBundle loadNibNamed:kFacebookAlertNibName owner:self options:nil].firstObject;
   return alert;
 }
 
@@ -26,23 +29,23 @@ extern NSString * const kUDAlreadySharedKey;
 
 - (IBAction)shareButtonTap:(id)sender
 {
+  [Statistics logEvent:kStatisticsEvent withParameters:@{kStatAction : kStatApply}];
   [Alohalytics logEvent:kFacebookInviteEventName withValue:@"shareTap"];
-  [[Statistics instance] logEvent:[NSString stringWithFormat:@"%@ShareTap", kFacebookInviteEventName]];
-  [self close];
-  [[NSUserDefaults standardUserDefaults] setBool:YES forKey:kUDAlreadySharedKey];
-  [[NSUserDefaults standardUserDefaults] synchronize];
+  [self close:nil];
+  [NSUserDefaults.standardUserDefaults setBool:YES forKey:kUDAlreadySharedKey];
+  [NSUserDefaults.standardUserDefaults synchronize];
 
   FBSDKAppInviteContent * const content = [[FBSDKAppInviteContent alloc] init];
   content.appLinkURL = [NSURL URLWithString:kFacebookAppName];
   content.appInvitePreviewImageURL = [NSURL URLWithString:kFacebookAlertPreviewImage];
-  [FBSDKAppInviteDialog showWithContent:content delegate:nil];
+  [FBSDKAppInviteDialog showFromViewController:self.alertController.ownerViewController withContent:content delegate:nil];
 }
 
 - (IBAction)notNowButtonTap:(id)sender
 {
+  [Statistics logEvent:kStatisticsEvent withParameters:@{kStatAction : kStatClose}];
   [Alohalytics logEvent:kFacebookInviteEventName withValue:@"notNowTap"];
-  [[Statistics instance] logEvent:[NSString stringWithFormat:@"%@NotNowTap", kFacebookInviteEventName]];
-  [self close];
+  [self close:nil];
 }
 
 @end

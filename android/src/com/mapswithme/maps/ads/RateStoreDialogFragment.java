@@ -23,6 +23,8 @@ import com.mapswithme.maps.MwmApplication;
 import com.mapswithme.maps.R;
 import com.mapswithme.maps.base.BaseMwmDialogFragment;
 import com.mapswithme.util.Constants;
+import com.mapswithme.util.Counters;
+import com.mapswithme.util.Graphics;
 import com.mapswithme.util.UiUtils;
 import com.mapswithme.util.Utils;
 import com.mapswithme.util.statistics.AlohaHelper;
@@ -47,7 +49,7 @@ public class RateStoreDialogFragment extends BaseMwmDialogFragment implements Vi
           @Override
           public void onClick(DialogInterface dialog, int which)
           {
-            Statistics.INSTANCE.trackSimpleNamedEvent(Statistics.EventName.RATE_DIALOG_LATER);
+            Statistics.INSTANCE.trackEvent(Statistics.EventName.RATE_DIALOG_LATER);
           }
         });
 
@@ -62,7 +64,7 @@ public class RateStoreDialogFragment extends BaseMwmDialogFragment implements Vi
         mRating = rating;
         if (rating >= BuildConfig.RATING_THRESHOLD)
         {
-          LikesManager.setRatingApplied(RateStoreDialogFragment.class, true);
+          Counters.setRatingApplied(RateStoreDialogFragment.class);
           dismiss();
           Utils.openAppInMarket(getActivity(), BuildConfig.REVIEW_URL);
         }
@@ -75,7 +77,9 @@ public class RateStoreDialogFragment extends BaseMwmDialogFragment implements Vi
             public void onAnimationEnd(Animator animation)
             {
               final Button button = (Button) root.findViewById(R.id.btn__explain_bad_rating);
-              button.setVisibility(View.VISIBLE);
+              UiUtils.show(button);
+              Graphics.tint(button);
+
               button.setOnClickListener(RateStoreDialogFragment.this);
               ((TextView) root.findViewById(R.id.tv__title)).setText(getString(R.string.rating_thanks));
               ((TextView) root.findViewById(R.id.tv__subtitle)).setText(getString(R.string.rating_share_ideas));
@@ -96,7 +100,7 @@ public class RateStoreDialogFragment extends BaseMwmDialogFragment implements Vi
   public void onCancel(DialogInterface dialog)
   {
     super.onCancel(dialog);
-    Statistics.INSTANCE.trackSimpleNamedEvent(Statistics.EventName.RATE_DIALOG_LATER);
+    Statistics.INSTANCE.trackEvent(Statistics.EventName.RATE_DIALOG_LATER);
   }
 
   @Override
@@ -105,7 +109,7 @@ public class RateStoreDialogFragment extends BaseMwmDialogFragment implements Vi
     switch (v.getId())
     {
     case R.id.btn__explain_bad_rating:
-      LikesManager.setRatingApplied(GooglePlusDialogFragment.class, true);
+      Counters.setRatingApplied(GooglePlusDialogFragment.class);
       dismiss();
       final Intent intent = new Intent(Intent.ACTION_SENDTO);
       final PackageInfo info;
@@ -118,7 +122,7 @@ public class RateStoreDialogFragment extends BaseMwmDialogFragment implements Vi
       {
         e.printStackTrace();
       }
-      intent.setData(Utils.buildMailUri(Constants.Url.MAIL_MAPSME_RATING, getString(R.string.rating_just_rated) + ": " + mRating,
+      intent.setData(Utils.buildMailUri(Constants.Email.RATING, getString(R.string.rating_just_rated) + ": " + mRating,
           "OS : " + Build.VERSION.SDK_INT + "\n" + "Version : " + BuildConfig.APPLICATION_ID + " " + BuildConfig.VERSION_NAME + "\n" +
               getString(R.string.rating_user_since, DateUtils.formatDateTime(getActivity(), installTime, 0)) + "\n\n"));
       try

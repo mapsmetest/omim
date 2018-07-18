@@ -7,7 +7,7 @@
 
 #include "std/algorithm.hpp"
 #include "std/limits.hpp"
-
+#include "std/string.hpp"
 
 namespace m2
 {
@@ -144,8 +144,8 @@ namespace m2
     }
 
     Point<T> Center() const { return Point<T>((m_minX + m_maxX) / 2.0, (m_minY + m_maxY) / 2.0); }
-    T SizeX() const { return (m_maxX - m_minX); }
-    T SizeY() const { return (m_maxY - m_minY); }
+    T SizeX() const { return max(static_cast<T>(0), m_maxX - m_minX); }
+    T SizeY() const { return max(static_cast<T>(0), m_maxY - m_minY); }
 
     void DivideByGreaterSize(Rect & r1, Rect & r2) const
     {
@@ -288,6 +288,12 @@ namespace m2
   }
 
   template <typename T>
+  inline bool IsEqualSize(Rect<T> const & r1, Rect<T> const & r2, double epsX, double epsY)
+  {
+    return fabs(r1.SizeX() - r2.SizeX()) < epsX && fabs(r1.SizeY() - r2.SizeY()) < epsY;
+  }
+
+  template <typename T>
   inline m2::Rect<T> const Add(m2::Rect<T> const & r, m2::Point<T> const & p)
   {
     return m2::Rect<T>(
@@ -347,6 +353,17 @@ namespace m2
         r1.maxY() + dy
     );
   }
+
+  template <typename T, typename TCollection>
+  inline bool HasIntersection(m2::Rect<T> const & rect, TCollection const & geometry)
+  {
+    for (auto const & g : geometry)
+    {
+      if (rect.IsIntersect(g))
+        return true;
+    }
+    return false;
+  };
 
   template <class TArchive, class PointT>
   TArchive & operator >> (TArchive & ar, m2::Rect<PointT> & rect)

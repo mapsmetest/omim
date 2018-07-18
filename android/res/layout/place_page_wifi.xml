@@ -1,31 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools"
-    android:id="@+id/ll__place_wifi"
-    android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:background="?attr/clickableBackground"
-    android:gravity="center_vertical"
-    android:orientation="horizontal"
-    android:paddingBottom="@dimen/margin_half"
-    android:paddingTop="@dimen/margin_half"
-    android:visibility="gone"
-    tools:visibility="visible"
-    tools:background="#40FF0000">
+  xmlns:android="http://schemas.android.com/apk/res/android"
+  xmlns:tools="http://schemas.android.com/tools"
+  android:id="@+id/ll__place_wifi"
+  style="@style/PlacePageItemFrame"
+  tools:background="#40FF0000"
+  tools:visibility="visible">
 
   <ImageView
-      android:id="@+id/iv__place_wifi"
-      android:layout_width="wrap_content"
-      android:layout_height="wrap_content"
-      android:layout_marginRight="@dimen/margin_double"
-      android:src="@drawable/ic_text_wifi"/>
+    android:id="@+id/iv__place_wifi"
+    style="@style/PlacePageMetadataIcon"
+    android:src="@drawable/ic_wifi"/>
 
   <TextView
-      android:id="@+id/tv__place_wifi"
-      android:layout_width="match_parent"
-      android:layout_height="wrap_content"
-      android:textColor="@color/text_place_page"
-      android:textSize="@dimen/text_size_body_1"
-      tools:text="Wi-Fi"/>
+    android:id="@+id/tv__place_wifi"
+    style="@style/PlacePageMetadataText"
+    android:text="@string/WiFi_available"/>
 </LinearLayout>

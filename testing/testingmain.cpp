@@ -2,31 +2,74 @@
 #include "testing/testregister.hpp"
 
 #include "base/logging.hpp"
-#include "base/regexp.hpp"
 #include "base/string_utils.hpp"
 #include "base/timer.hpp"
+#include "base/waiter.hpp"
 
+#include "std/chrono.hpp"
 #include "std/cstring.hpp"
 #include "std/iomanip.hpp"
 #include "std/iostream.hpp"
-#include "std/target_os.hpp"
+#include "std/regex.hpp"
 #include "std/string.hpp"
+#include "std/target_os.hpp"
 #include "std/vector.hpp"
 
-#ifdef OMIM_UNIT_TEST_WITH_QT_EVENT_LOOP
-  #include <Qt>
+#ifdef TARGET_OS_IPHONE
+# include <CoreFoundation/CoreFoundation.h>
+#endif
+
+#ifndef OMIM_UNIT_TEST_DISABLE_PLATFORM_INIT
+# include "platform/platform.hpp"
+#endif
+
+#if defined(OMIM_UNIT_TEST_WITH_QT_EVENT_LOOP) && !defined(OMIM_OS_IPHONE)
+  #include <QtCore/Qt>
   #ifdef OMIM_OS_MAC // on Mac OS X native run loop works only for QApplication :(
-    #if QT_VERSION < QT_VERSION_CHECK(5, 0, 0)
-      #include <QtGui/QApplication>
-    #else
-      #include <QtWidgets/QApplication>
-    #endif
+    #include <QtWidgets/QApplication>
     #define QAPP QApplication
   #else
     #include <QtCore/QCoreApplication>
     #define QAPP QCoreApplication
   #endif
 #endif
+
+namespace
+{
+base::Waiter g_waiter;
+}  // namespace
+namespace testing
+{
+
+void RunEventLoop()
+{
+#if defined(OMIM_OS_IPHONE)
+  CFRunLoopRun();
+#elif defined (QAPP)
+  QAPP::exec();
+#endif
+}
+
+void StopEventLoop()
+{
+#if defined(OMIM_OS_IPHONE)
+  CFRunLoopStop(CFRunLoopGetMain());
+#elif defined(QAPP)
+  QAPP::exit();
+#endif
+}
+
+void Wait()
+{
+  g_waiter.Wait();
+  g_waiter.Reset();
+}
+
+void Notify()
+{
+  g_waiter.Notify();
+}
+} //  namespace testing
 
 namespace
 {
@@ -39,6 +82,7 @@ char const kSuppressOption[] = "--suppress=";
 char const kHelpOption[] = "--help";
 char const kDataPathOptions[] = "--data_path=";
 char const kResourcePathOptions[] = "--user_resource_path=";
+char const kListAllTestsOption[] = "--list_tests";
 
 enum Status
 {
@@ -69,6 +113,7 @@ void Usage(char const * name)
                 "Do not run tests with names corresponding to regexp.");
   DisplayOption(cerr, kDataPathOptions, "<Path>", "Path to data files.");
   DisplayOption(cerr, kResourcePathOptions, "<Path>", "Path to resources, styles and classificators.");
+  DisplayOption(cerr, kListAllTestsOption, "List all the tests in the test suite and exit.");
   DisplayOption(cerr, kHelpOption, "Print this help message and exit.");
 }
 
@@ -87,6 +132,8 @@ void ParseOptions(int argc, char * argv[], CommandLineOptions & options)
       options.m_resourcePath = arg + sizeof(kResourcePathOptions) - 1;
     if (strcmp(arg, kHelpOption) == 0)
       options.m_help = true;
+    if (strcmp(arg, kListAllTestsOption) == 0)
+      options.m_listTests = true;
   }
 }
 }  // namespace
@@ -98,7 +145,7 @@ CommandLineOptions const & GetTestingOptions()
 
 int main(int argc, char * argv[])
 {
-#ifdef OMIM_UNIT_TEST_WITH_QT_EVENT_LOOP
+#if defined(OMIM_UNIT_TEST_WITH_QT_EVENT_LOOP) && !defined(OMIM_OS_IPHONE)
   QAPP theApp(argc, argv);
   UNUSED_VALUE(theApp);
 #else
@@ -106,8 +153,8 @@ int main(int argc, char * argv[])
   UNUSED_VALUE(argv);
 #endif
 
-  my::g_LogLevel = LINFO;
-#if defined(OMIM_OS_MAC) || defined(OMIM_OS_LINUX)
+  my::ScopedLogLevelChanger const infoLogLevel(LINFO);
+#if defined(OMIM_OS_MAC) || defined(OMIM_OS_LINUX) || defined(OMIM_OS_IPHONE)
   my::SetLogMessageFn(my::LogMessageTests);
 #endif
 
@@ -122,13 +169,23 @@ int main(int argc, char * argv[])
     return STATUS_SUCCESS;
   }
 
-  regexp::RegExpT filterRegExp;
+  regex filterRegExp;
   if (g_testingOptions.m_filterRegExp)
-    regexp::Create(g_testingOptions.m_filterRegExp, filterRegExp);
+    filterRegExp.assign(g_testingOptions.m_filterRegExp);
 
-  regexp::RegExpT suppressRegExp;
+  regex suppressRegExp;
   if (g_testingOptions.m_suppressRegExp)
-    regexp::Create(g_testingOptions.m_suppressRegExp, suppressRegExp);
+    suppressRegExp.assign(g_testingOptions.m_suppressRegExp);
+
+#ifndef OMIM_UNIT_TEST_DISABLE_PLATFORM_INIT
+  // Setting stored paths from testingmain.cpp
+  Platform & pl = GetPlatform();
+  CommandLineOptions const & options = GetTestingOptions();
+  if (options.m_dataPath)
+    pl.SetWritableDirForTests(options.m_dataPath);
+  if (options.m_resourcePath)
+    pl.SetResourceDir(options.m_resourcePath);
+#endif
 
   for (TestRegister * pTest = TestRegister::FirstRegister(); pTest; pTest = pTest->m_pNext)
   {
@@ -144,15 +201,29 @@ int main(int argc, char * argv[])
     testResults.push_back(true);
   }
 
+  if (GetTestingOptions().m_listTests)
+  {
+    for (auto const & name : testNames)
+      cout << name << endl;
+    return 0;
+  }
+
   int iTest = 0;
   for (TestRegister * pTest = TestRegister::FirstRegister(); pTest; ++iTest, pTest = pTest->m_pNext)
   {
-    if (g_testingOptions.m_filterRegExp && !regexp::Matches(testNames[iTest], filterRegExp))
+    auto const & testName = testNames[iTest];
+    if (g_testingOptions.m_filterRegExp &&
+        !regex_search(testName.begin(), testName.end(), filterRegExp))
+    {
       continue;
-    if (g_testingOptions.m_suppressRegExp && regexp::Matches(testNames[iTest], suppressRegExp))
+    }
+    if (g_testingOptions.m_suppressRegExp &&
+        regex_search(testName.begin(), testName.end(), suppressRegExp))
+    {
       continue;
+    }
 
-    LOG(LINFO, ("Running", testNames[iTest]));
+    LOG(LINFO, ("Running", testName));
     if (!g_bLastTestOK)
     {
       // Somewhere else global variables have been reset.

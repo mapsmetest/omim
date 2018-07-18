@@ -1,11 +1,13 @@
 // Boost.Geometry (aka GGL, Generic Geometry Library)
 
-// Copyright (c) 2015, Oracle and/or its affiliates.
+// Copyright (c) 2015-2016, Oracle and/or its affiliates.
 
+// Contributed and/or modified by Vissarion Fysikopoulos, on behalf of Oracle
 // Contributed and/or modified by Menelaos Karavelas, on behalf of Oracle
 
-// Licensed under the Boost Software License version 1.0.
-// http://www.boost.org/users/license.html
+// Distributed under the Boost Software License, Version 1.0.
+// (See accompanying file LICENSE_1_0.txt or copy at
+// http://www.boost.org/LICENSE_1_0.txt)
 
 #ifndef BOOST_GEOMETRY_ALGORITHMS_DETAIL_ENVELOPE_RANGE_OF_BOXES_HPP
 #define BOOST_GEOMETRY_ALGORITHMS_DETAIL_ENVELOPE_RANGE_OF_BOXES_HPP
@@ -23,9 +25,11 @@
 #include <boost/geometry/core/coordinate_type.hpp>
 
 #include <boost/geometry/util/math.hpp>
+#include <boost/geometry/util/range.hpp>
 
-#include <boost/geometry/algorithms/assign.hpp>
+#include <boost/geometry/algorithms/detail/convert_point_to_point.hpp>
 #include <boost/geometry/algorithms/detail/max_interval_gap.hpp>
+#include <boost/geometry/algorithms/detail/expand/indexed.hpp>
 
 
 namespace boost { namespace geometry
@@ -92,8 +96,6 @@ struct envelope_range_of_longitudes
 
         Longitude const zero = 0;
         Longitude const period = constants::period();
-        Longitude const min_longitude = constants::min_longitude();
-        Longitude const max_longitude = constants::max_longitude();
 
         lon_min = lon_max = zero;
 
@@ -118,12 +120,17 @@ struct envelope_range_of_longitudes
                                                           max_gap_right);
 
                 BOOST_GEOMETRY_ASSERT(! math::larger(lon_min, lon_max));
-                BOOST_GEOMETRY_ASSERT(! math::larger(lon_max, max_longitude));
-                BOOST_GEOMETRY_ASSERT(! math::smaller(lon_min, min_longitude));
+                BOOST_GEOMETRY_ASSERT
+                    (! math::larger(lon_max, constants::max_longitude()));
+                BOOST_GEOMETRY_ASSERT
+                    (! math::smaller(lon_min, constants::min_longitude()));
 
-                BOOST_GEOMETRY_ASSERT(! math::larger(max_gap_left, max_gap_right));
-                BOOST_GEOMETRY_ASSERT(! math::larger(max_gap_right, max_longitude));
-                BOOST_GEOMETRY_ASSERT(! math::smaller(max_gap_left, min_longitude));
+                BOOST_GEOMETRY_ASSERT
+                    (! math::larger(max_gap_left, max_gap_right));
+                BOOST_GEOMETRY_ASSERT
+                    (! math::larger(max_gap_right, constants::max_longitude()));
+                BOOST_GEOMETRY_ASSERT
+                    (! math::smaller(max_gap_left, constants::min_longitude()));
 
                 if (math::larger(max_gap, zero))
                 {
@@ -140,6 +147,74 @@ struct envelope_range_of_longitudes
 };
 
 
+template <std::size_t Dimension, std::size_t DimensionCount>
+struct envelope_range_of_boxes_by_expansion
+{
+    template <typename RangeOfBoxes, typename Box, typename Strategy>
+    static inline void apply(RangeOfBoxes const& range_of_boxes,
+                             Box& mbr,
+                             Strategy const& strategy)
+    {
+        typedef typename boost::range_value<RangeOfBoxes>::type box_type;
+
+        typedef typename boost::range_iterator
+            <
+                RangeOfBoxes const
+            >::type iterator_type;
+
+        // first initialize MBR
+        detail::indexed_point_view<Box, min_corner> mbr_min(mbr);
+        detail::indexed_point_view<Box, max_corner> mbr_max(mbr);
+
+        detail::indexed_point_view<box_type const, min_corner>
+            first_box_min(range::front(range_of_boxes));
+
+        detail::indexed_point_view<box_type const, max_corner>
+            first_box_max(range::front(range_of_boxes));
+
+        detail::conversion::point_to_point
+            <
+                detail::indexed_point_view<box_type const, min_corner>,
+                detail::indexed_point_view<Box, min_corner>,
+                Dimension,
+                DimensionCount
+            >::apply(first_box_min, mbr_min);
+
+        detail::conversion::point_to_point
+            <
+                detail::indexed_point_view<box_type const, max_corner>,
+                detail::indexed_point_view<Box, max_corner>,
+                Dimension,
+                DimensionCount
+            >::apply(first_box_max, mbr_max);
+
+        // now expand using the remaining boxes
+        iterator_type it = boost::begin(range_of_boxes);
+        for (++it; it != boost::end(range_of_boxes); ++it)
+        {
+            detail::expand::indexed_loop
+                <
+                    strategy::compare::default_strategy,
+                    strategy::compare::default_strategy,
+                    min_corner,
+                    Dimension,
+                    DimensionCount
+                >::apply(mbr, *it, strategy);
+
+            detail::expand::indexed_loop
+                <
+                    strategy::compare::default_strategy,
+                    strategy::compare::default_strategy,
+                    max_corner,
+                    Dimension,
+                    DimensionCount
+                >::apply(mbr, *it, strategy);
+        }
+    }
+
+};
+
+
 struct envelope_range_of_boxes
 {
     template <std::size_t Index>
@@ -153,8 +228,10 @@ struct envelope_range_of_boxes
         }
     };
 
-    template <typename RangeOfBoxes, typename Box>
-    static inline void apply(RangeOfBoxes const& range_of_boxes, Box& mbr)
+    template <typename RangeOfBoxes, typename Box, typename Strategy>
+    static inline void apply(RangeOfBoxes const& range_of_boxes,
+                             Box& mbr,
+                             Strategy const& strategy)
     {
         // boxes in the range are assumed to be normalized already
 
@@ -217,7 +294,8 @@ struct envelope_range_of_boxes
             }
         }
 
-        coordinate_type lon_min(0), lon_max(0);
+        coordinate_type lon_min = 0;
+        coordinate_type lon_max = 0;
         envelope_range_of_longitudes
             <
                 units_type
@@ -225,11 +303,22 @@ struct envelope_range_of_boxes
 
         // do not convert units; conversion will be performed at a
         // higher level
-        assign_values(mbr,
-                      lon_min,
-                      geometry::get<min_corner, 1>(*it_min),
-                      lon_max,
-                      geometry::get<max_corner, 1>(*it_max));
+
+        // assign now the min/max longitude/latitude values
+        detail::indexed_point_view<Box, min_corner> mbr_min(mbr);
+        detail::indexed_point_view<Box, max_corner> mbr_max(mbr);
+
+        geometry::set<0>(mbr_min, lon_min);
+        geometry::set<1>(mbr_min, geometry::get<min_corner, 1>(*it_min));
+        geometry::set<0>(mbr_max, lon_max);
+        geometry::set<1>(mbr_max, geometry::get<max_corner, 1>(*it_max));
+
+        // what remains to be done is to compute the envelope range
+        // for the remaining dimensions (if any)
+        envelope_range_of_boxes_by_expansion
+            <
+                2, dimension<Box>::value
+            >::apply(range_of_boxes, mbr, strategy);
     }
 };
 

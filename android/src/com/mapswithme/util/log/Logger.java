@@ -1,28 +1,17 @@
 package com.mapswithme.util.log;
 
-import android.text.TextUtils;
 
-public abstract class Logger
+public interface Logger
 {
-  protected String tag = "MAPSWITHME";
-
-  protected Logger() {}
-
-  protected Logger(String tag)
-  {
-    this.tag = tag;
-  }
-
-  static protected String join(Object... args)
-  {
-    return (args != null ? TextUtils.join(", ", args) : "");
-  }
-
-  public abstract void d(String message);
-
-  public abstract void e(String message);
-
-  public abstract void d(String message, Object... args);
-
-  public abstract void e(String message, Object... args);
+  void v(String tag, String msg);
+  void v(String tag, String msg, Throwable tr);
+  void d(String tag, String msg);
+  void d(String tag, String msg, Throwable tr);
+  void i(String tag, String msg);
+  void i(String tag, String msg, Throwable tr);
+  void w(String tag, String msg);
+  void w(String tag, String msg, Throwable tr);
+  void w(String tag, Throwable tr);
+  void e(String tag, String msg);
+  void e(String tag, String msg, Throwable tr);
 }

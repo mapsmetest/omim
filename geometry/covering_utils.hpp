@@ -1,11 +1,15 @@
 #pragma once
-#include "geometry/point2d.hpp"
+#include "point2d.hpp"
+#include "robust_orientation.hpp"
+#include "triangle2d.hpp"
+
 #include "base/assert.hpp"
 #include "base/base.hpp"
 #include "base/buffer_vector.hpp"
 #include "base/logging.hpp"
 #include "base/math.hpp"
-#include "std/algorithm.hpp"
+
+#include <cmath>
 
 namespace covering
 {
@@ -25,7 +29,7 @@ inline CellObjectIntersection IntersectCellWithLine(CellIdT const cell,
                                                     m2::PointD const & a,
                                                     m2::PointD const & b)
 {
-  pair<uint32_t, uint32_t> const xy = cell.XY();
+  std::pair<uint32_t, uint32_t> const xy = cell.XY();
   uint32_t const r = cell.Radius();
   m2::PointD const cellCorners[4] =
   {
@@ -35,7 +39,7 @@ inline CellObjectIntersection IntersectCellWithLine(CellIdT const cell,
     m2::PointD(xy.first + r, xy.second - r)
   };
   for (int i = 0; i < 4; ++i)
-    if (m2::SegmentsIntersect(a, b, cellCorners[i], cellCorners[i == 0 ? 3 : i - 1]))
+    if (m2::robust::SegmentsIntersect(a, b, cellCorners[i], cellCorners[i == 0 ? 3 : i - 1]))
       return CELL_OBJECT_INTERSECT;
   if (xy.first - r <= a.x && a.x <= xy.first + r && xy.second - r <= a.y && a.y <= xy.second + r)
     return OBJECT_INSIDE_CELL;
@@ -64,7 +68,7 @@ CellObjectIntersection IntersectCellWithTriangle(
   ASSERT_EQUAL(i3, i1, (cell, a, b, c));
   if (i1 == OBJECT_INSIDE_CELL || i2 == OBJECT_INSIDE_CELL || i3 == OBJECT_INSIDE_CELL)
     return OBJECT_INSIDE_CELL;
-  pair<uint32_t, uint32_t> const xy = cell.XY();
+  std::pair<uint32_t, uint32_t> const xy = cell.XY();
   if (m2::IsPointStrictlyInsideTriangle(m2::PointD(xy.first, xy.second), a, b, c))
     return CELL_INSIDE_OBJECT;
   return CELL_OBJECT_NO_INTERSECTION;
@@ -80,7 +84,7 @@ void CoverObject(IntersectF const & intersect, uint64_t cellPenaltyArea, CellIdC
     return;
   }
 
-  uint64_t const cellArea = my::sq(uint64_t(1 << (cellDepth - 1 - cell.Level())));
+  uint64_t const cellArea = std::pow(uint64_t(1 << (cellDepth - 1 - cell.Level())), 2);
   CellObjectIntersection const intersection = intersect(cell);
 
   if (intersection == CELL_OBJECT_NO_INTERSECTION)
@@ -97,16 +101,20 @@ void CoverObject(IntersectF const & intersect, uint64_t cellPenaltyArea, CellIdC
 
   uint64_t subdivArea = 0;
   for (size_t i = 0; i < subdiv.size(); ++i)
-    subdivArea += my::sq(uint64_t(1 << (CellIdT::DEPTH_LEVELS - 1 - subdiv[i].Level())));
+    subdivArea += std::pow(uint64_t(1 << (cellDepth - 1 - subdiv[i].Level())), 2);
 
   ASSERT(!subdiv.empty(), (cellPenaltyArea, out, cell));
 
-  if (subdiv.empty() || cellPenaltyArea * (int(subdiv.size()) - 1) >= cellArea - subdivArea)
+  // This criteria is more clear for me. Let's divide if we can save more than cellPenaltyArea.
+  if (subdiv.size() > 1 && cellPenaltyArea >= cellArea - subdivArea)
+  {
     out.push_back(cell);
+  }
   else
+  {
     for (size_t i = 0; i < subdiv.size(); ++i)
       out.push_back(subdiv[i]);
+  }
 }
-
 
 } // namespace covering

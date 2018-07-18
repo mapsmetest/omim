@@ -1,24 +1,29 @@
 #include "generator/feature_builder.hpp"
 
-#include "routing/car_model.hpp"
-#include "routing/pedestrian_model.hpp"
+#include "routing/routing_helpers.hpp"
+
+#include "routing_common/bicycle_model.hpp"
+#include "routing_common/car_model.hpp"
+#include "routing_common/pedestrian_model.hpp"
 
 #include "indexer/feature_impl.hpp"
 #include "indexer/feature_visibility.hpp"
-#include "indexer/geometry_serialization.hpp"
-#include "indexer/coding_params.hpp"
+
+#include "coding/bit_streams.hpp"
+#include "coding/byte_stream.hpp"
+#include "coding/geometry_coding.hpp"
 
 #include "geometry/region2d.hpp"
 
-#include "coding/byte_stream.hpp"
-
 #include "base/logging.hpp"
+#include "base/string_utils.hpp"
 
-#include "std/cstring.hpp"
-#include "std/algorithm.hpp"
-
+#include <algorithm>
+#include <cstring>
+#include <vector>
 
 using namespace feature;
+using namespace std;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // FeatureBuilder1 implementation
@@ -68,6 +73,23 @@ void FeatureBuilder1::SetCenter(m2::PointD const & p)
   m_center = p;
   m_params.SetGeomType(GEOM_POINT);
   m_limitRect.Add(p);
+}
+
+void FeatureBuilder1::SetRank(uint8_t rank)
+{
+  m_params.rank = rank;
+}
+
+void FeatureBuilder1::AddHouseNumber(string const & houseNumber)
+{
+  m_params.AddHouseNumber(houseNumber);
+}
+
+void FeatureBuilder1::AddStreet(string const & streetName) { m_params.AddStreet(streetName); }
+
+void FeatureBuilder1::AddPostcode(string const & postcode)
+{
+  m_params.GetMetadata().Set(Metadata::FMD_POSTCODE, postcode);
 }
 
 void FeatureBuilder1::AddPoint(m2::PointD const & p)
@@ -131,12 +153,21 @@ void FeatureBuilder1::AddPolygon(vector<m2::PointD> & poly)
   m_polygons.back().swap(poly);
 }
 
+void FeatureBuilder1::ResetGeometry()
+{
+  m_polygons.clear();
+  m_polygons.push_back(TPointSeq());
+  m_limitRect.MakeEmpty();
+}
+
 bool FeatureBuilder1::RemoveInvalidTypes()
 {
   if (!m_params.FinishAddingTypes())
     return false;
 
-  return feature::RemoveNoDrawableTypes(m_params.m_Types, m_params.GetGeomType());
+  return feature::RemoveNoDrawableTypes(m_params.m_Types,
+                                        m_params.GetGeomType(),
+                                        m_params.IsEmptyNames());
 }
 
 bool FeatureBuilder1::FormatFullAddress(string & res) const
@@ -155,7 +186,7 @@ FeatureBase FeatureBuilder1::GetFeatureBase() const
   memcpy(f.m_types, &m_params.m_Types[0], sizeof(uint32_t) * m_params.m_Types.size());
   f.m_limitRect = m_limitRect;
 
-  f.m_bTypesParsed = f.m_bCommonParsed = true;
+  f.m_typesParsed = f.m_commonParsed = true;
 
   return f;
 }
@@ -196,18 +227,13 @@ namespace
 
 bool FeatureBuilder1::IsRoad() const
 {
-  static routing::CarModel const carModel;
-  static routing::PedestrianModel const pedModel;
-  return carModel.IsRoad(m_params.m_Types) || pedModel.IsRoad(m_params.m_Types);
+  return routing::IsRoad(m_params.m_Types);
 }
 
 bool FeatureBuilder1::PreSerialize()
 {
   if (!m_params.IsValid())
     return false;
-
-  /// @todo Do not use flats info. Maybe in future.
-  m_params.flats.clear();
 
   switch (m_params.GetGeomType())
   {
@@ -221,7 +247,7 @@ bool FeatureBuilder1::PreSerialize()
 
     // Store ref's in name field (used in "highway-motorway_junction").
     if (m_params.name.IsEmpty() && !m_params.ref.empty())
-      m_params.name.AddString(StringUtf8Multilang::DEFAULT_CODE, m_params.ref);
+      m_params.name.AddString(StringUtf8Multilang::kDefaultCode, m_params.ref);
 
     m_params.ref.clear();
     break;
@@ -260,11 +286,22 @@ void FeatureBuilder1::RemoveUselessNames()
   if (!m_params.name.IsEmpty() && !IsCoastCell())
   {
     using namespace feature;
-
-    static TypeSetChecker const checkBoundary({ "boundary", "administrative" });
+    // Use lambda syntax to correctly compile according to standard:
+    // http://en.cppreference.com/w/cpp/algorithm/remove
+    //     The signature of the predicate function should be equivalent to the following:
+    //     bool pred(const Type &a);
+    // Without it on clang-libc++ on Linux we get:
+    // candidate template ignored: substitution failure
+    //      [with _Tp = bool (unsigned int) const]: reference to function type 'bool (unsigned int) const' cannot have 'const'
+    //      qualifier
+    auto const typeRemover = [](uint32_t type)
+    {
+      static TypeSetChecker const checkBoundary({ "boundary", "administrative" });
+      return checkBoundary.IsEqual(type);
+    };
 
     TypesHolder types(GetFeatureBase());
-    if (types.RemoveIf(bind(&TypeSetChecker::IsEqual, cref(checkBoundary), _1)))
+    if (types.RemoveIf(typeRemover))
     {
       pair<int, int> const range = GetDrawableScaleRangeForRules(types, RULE_ANY_TEXT);
       if (range.first == -1)
@@ -326,11 +363,12 @@ bool FeatureBuilder1::CheckValid() const
   return true;
 }
 
-void FeatureBuilder1::SerializeBase(TBuffer & data, serial::CodingParams const & params, bool needSerializeAdditionalInfo) const
+void FeatureBuilder1::SerializeBase(TBuffer & data, serial::GeometryCodingParams const & params,
+                                    bool saveAddInfo) const
 {
   PushBackByteSink<TBuffer> sink(data);
 
-  m_params.Write(sink, needSerializeAdditionalInfo);
+  m_params.Write(sink, saveAddInfo);
 
   if (m_params.GetGeomType() == GEOM_POINT)
     serial::SavePoint(sink, m_center, params);
@@ -342,9 +380,9 @@ void FeatureBuilder1::Serialize(TBuffer & data) const
 
   data.clear();
 
-  serial::CodingParams cp;
+  serial::GeometryCodingParams cp;
 
-  SerializeBase(data, cp);
+  SerializeBase(data, cp, true /* store additional info from FeatureParams */);
 
   PushBackByteSink<TBuffer> sink(data);
 
@@ -370,9 +408,35 @@ void FeatureBuilder1::Serialize(TBuffer & data) const
 #endif
 }
 
+void FeatureBuilder1::SerializeBorder(serial::GeometryCodingParams const & params,
+                                      TBuffer & data) const
+{
+  data.clear();
+
+  PushBackByteSink<TBuffer> sink(data);
+  WriteToSink(sink, GetMostGenericOsmId().GetEncodedId());
+
+  CHECK_GREATER(m_polygons.size(), 0, ());
+
+  WriteToSink(sink, m_polygons.size() - 1);
+
+  auto toU = [&params](m2::PointD const & p) { return PointDToPointU(p, params.GetCoordBits()); };
+  for (auto const & polygon : m_polygons)
+  {
+    WriteToSink(sink, polygon.size());
+    m2::PointU last = params.GetBasePoint();
+    for (auto const & p : polygon)
+    {
+      auto const curr = toU(p);
+      coding::EncodePointDelta(sink, last, curr);
+      last = curr;
+    }
+  }
+}
+
 void FeatureBuilder1::Deserialize(TBuffer & data)
 {
-  serial::CodingParams cp;
+  serial::GeometryCodingParams cp;
 
   ArrayByteSource source(&data[0]);
   m_params.Read(source);
@@ -416,21 +480,46 @@ void FeatureBuilder1::SetOsmId(osm::Id id)
   m_osmIds.assign(1, id);
 }
 
+osm::Id FeatureBuilder1::GetFirstOsmId() const
+{
+  ASSERT(!m_osmIds.empty(), ());
+  return m_osmIds.front();
+}
+
 osm::Id FeatureBuilder1::GetLastOsmId() const
 {
   ASSERT(!m_osmIds.empty(), ());
   return m_osmIds.back();
 }
 
-string FeatureBuilder1::GetOsmIdsString() const
+osm::Id FeatureBuilder1::GetMostGenericOsmId() const
 {
-  if (m_osmIds.empty())
-    return "(NOT AN OSM FEATURE)";
-
-  ostringstream out;
+  ASSERT(!m_osmIds.empty(), ());
+  auto result = m_osmIds.front();
   for (auto const & id : m_osmIds)
-    out << id.Type() << " id=" << id.OsmId() << " ";
-  return out.str();
+  {
+    auto const t = id.GetType();
+    if (t == osm::Id::Type::Relation)
+    {
+      result = id;
+      break;
+    }
+    else if (t == osm::Id::Type::Way && result.GetType() == osm::Id::Type::Node)
+    {
+      result = id;
+    }
+  }
+  return result;
+}
+
+bool FeatureBuilder1::HasOsmId(osm::Id const & id) const
+{
+  for (auto const & cid : m_osmIds)
+  {
+    if (cid == id)
+      return true;
+  }
+  return false;
 }
 
 int FeatureBuilder1::GetMinFeatureDrawScale() const
@@ -439,14 +528,6 @@ int FeatureBuilder1::GetMinFeatureDrawScale() const
 
   // some features become invisible after merge processing, so -1 is possible
   return (minScale == -1 ? 1000 : minScale);
-}
-
-void FeatureBuilder1::SetCoastCell(int64_t iCell, string const & strCell)
-{
-  m_coastCell = iCell;
-
-  ASSERT(m_params.name.IsEmpty(), ());
-  m_params.name.AddString(0, strCell);
 }
 
 bool FeatureBuilder1::AddName(string const & lang, string const & name)
@@ -492,8 +573,10 @@ bool FeatureBuilder1::IsDrawableInRange(int lowScale, int highScale) const
     FeatureBase const fb = GetFeatureBase();
 
     while (lowScale <= highScale)
+    {
       if (feature::IsDrawableForIndex(fb, lowScale++))
         return true;
+    }
   }
 
   return false;
@@ -501,11 +584,15 @@ bool FeatureBuilder1::IsDrawableInRange(int lowScale, int highScale) const
 
 uint64_t FeatureBuilder1::GetWayIDForRouting() const
 {
-  if (m_osmIds.size() == 1 && m_osmIds[0].IsWay() && IsLine() && IsRoad())
-    return m_osmIds[0].OsmId();
+  if (m_osmIds.size() == 1 && m_osmIds[0].GetType() == osm::Id::Type::Way && IsLine() && IsRoad())
+    return m_osmIds[0].GetOsmId();
   return 0;
 }
 
+string DebugPrint(FeatureBuilder2 const & f)
+{
+  return DebugPrint(static_cast<FeatureBuilder1 const &>(f));
+}
 
 bool FeatureBuilder2::PreSerialize(SupportingData const & data)
 {
@@ -526,42 +613,41 @@ bool FeatureBuilder2::PreSerialize(SupportingData const & data)
   return TBase::PreSerialize();
 }
 
-namespace
+bool FeatureBuilder2::IsLocalityObject() const
 {
-  template <class TSink> class BitSink
-  {
-    TSink & m_sink;
-    uint8_t m_pos;
-    uint8_t m_current;
-
-  public:
-    BitSink(TSink & sink) : m_sink(sink), m_pos(0), m_current(0) {}
-
-    void Finish()
-    {
-      if (m_pos > 0)
-      {
-        WriteToSink(m_sink, m_current);
-        m_pos = 0;
-        m_current = 0;
-      }
-    }
-
-    void Write(uint8_t value, uint8_t count)
-    {
-      ASSERT_LESS ( count, 9, () );
-      ASSERT_EQUAL ( value >> count, 0, () );
-
-      if (m_pos + count > 8)
-        Finish();
-
-      m_current |= (value << m_pos);
-      m_pos += count;
-    }
-  };
+  return (m_params.GetGeomType() == GEOM_POINT || m_params.GetGeomType() == GEOM_AREA) &&
+         !m_params.house.IsEmpty();
 }
 
-void FeatureBuilder2::Serialize(SupportingData & data, serial::CodingParams const & params)
+void FeatureBuilder2::SerializeLocalityObject(serial::GeometryCodingParams const & params,
+                                              SupportingData & data) const
+{
+  data.m_buffer.clear();
+
+  PushBackByteSink<TBuffer> sink(data.m_buffer);
+  WriteToSink(sink, GetMostGenericOsmId().GetEncodedId());
+
+  auto const type = m_params.GetGeomType();
+  WriteToSink(sink, static_cast<uint8_t>(type));
+
+  if (type == GEOM_POINT)
+  {
+    serial::SavePoint(sink, m_center, params);
+    return;
+  }
+
+  CHECK_EQUAL(type, GEOM_AREA, ("Supported types are GEOM_POINT and GEOM_AREA"));
+
+  uint32_t trgCount = base::asserted_cast<uint32_t>(data.m_innerTrg.size());
+  CHECK_GREATER(trgCount, 2, ());
+  trgCount -= 2;
+
+  WriteToSink(sink, trgCount);
+  serial::SaveInnerTriangles(data.m_innerTrg, params, sink);
+}
+
+void FeatureBuilder2::Serialize(SupportingData & data,
+                                serial::GeometryCodingParams const & params) const
 {
   data.m_buffer.clear();
 
@@ -570,32 +656,32 @@ void FeatureBuilder2::Serialize(SupportingData & data, serial::CodingParams cons
 
   PushBackByteSink<TBuffer> sink(data.m_buffer);
 
-  uint8_t const ptsCount = static_cast<uint8_t>(data.m_innerPts.size());
-  uint8_t trgCount = static_cast<uint8_t>(data.m_innerTrg.size());
+  uint8_t const ptsCount = base::asserted_cast<uint8_t>(data.m_innerPts.size());
+  uint8_t trgCount = base::asserted_cast<uint8_t>(data.m_innerTrg.size());
   if (trgCount > 0)
   {
     ASSERT_GREATER ( trgCount, 2, () );
     trgCount -= 2;
   }
 
-  BitSink< PushBackByteSink<TBuffer> > bitSink(sink);
-
   EGeomType const type = m_params.GetGeomType();
 
-  if (type == GEOM_LINE)
   {
-    bitSink.Write(ptsCount, 4);
-    if (ptsCount == 0)
-      bitSink.Write(data.m_ptsMask, 4);
-  }
-  else if (type == GEOM_AREA)
-  {
-    bitSink.Write(trgCount, 4);
-    if (trgCount == 0)
-      bitSink.Write(data.m_trgMask, 4);
-  }
+    BitWriter<PushBackByteSink<TBuffer>> bitSink(sink);
 
-  bitSink.Finish();
+    if (type == GEOM_LINE)
+    {
+      bitSink.Write(ptsCount, 4);
+      if (ptsCount == 0)
+        bitSink.Write(data.m_ptsMask, 4);
+    }
+    else if (type == GEOM_AREA)
+    {
+      bitSink.Write(trgCount, 4);
+      if (trgCount == 0)
+        bitSink.Write(data.m_trgMask, 4);
+    }
+  }
 
   if (type == GEOM_LINE)
   {
@@ -623,7 +709,7 @@ void FeatureBuilder2::Serialize(SupportingData & data, serial::CodingParams cons
 
       // offsets was pushed from high scale index to low
       reverse(data.m_ptsOffset.begin(), data.m_ptsOffset.end());
-      serial::WriteVarUintArray(data.m_ptsOffset, sink);
+      WriteVarUintArray(data.m_ptsOffset, sink);
     }
   }
   else if (type == GEOM_AREA)
@@ -634,7 +720,7 @@ void FeatureBuilder2::Serialize(SupportingData & data, serial::CodingParams cons
     {
       // offsets was pushed from high scale index to low
       reverse(data.m_trgOffset.begin(), data.m_trgOffset.end());
-      serial::WriteVarUintArray(data.m_trgOffset, sink);
+      WriteVarUintArray(data.m_trgOffset, sink);
     }
   }
 }

@@ -20,7 +20,7 @@
 	<!-- Settings/Downloader - No internet connection dialog title -->
 	<text id="IDS_NO_INTERNET_CONNECTION_DETECTED">Não foi detetada uma ligação à Internet</text>
 	<!-- Settings/Downloader - 3G download warning dialog title -->
-	<text id="IDS_NO_WIFI_ASK_CELLULAR_DOWNLOAD">Não detetada uma ligação WiFi. Pretende utilizar os dados por pacotes (GPRS, EDGE or 3G) para descarregar %s?</text>
+	<text id="IDS_NO_WIFI_ASK_CELLULAR_DOWNLOAD">Não detetada uma ligação WiFi. Pretende utilizar os dados por pacotes (GPRS, EDGE, 3G or LTE) para descarregar %s?</text>
 	<!-- Settings/Downloader - No internet connection dialog message -->
 	<text id="IDS_USE_WIFI_RECOMMENDATION_TEXT">Recomendamos a utilização de WiFi para descarregar grandes mapas</text>
 	<text id="IDS_DOWNLOAD">Descarga</text>
@@ -91,8 +91,8 @@
 	<text id="IDS_SHARE">Partilhar</text>
 	<!-- iOS share by Message button text (including SMS) -->
 	<text id="IDS_MESSAGE">Mensagem</text>
-	<!-- Share by email button text -->
-	<text id="IDS_EMAIL">E-Mail</text>
+	<!-- Share by email button text, also used in editor. -->
+	<text id="IDS_EMAIL">E-mail</text>
 	<!-- Copy Link -->
 	<text id="IDS_COPY_LINK">Copiar hiperligação</text>
 	<!-- Used for bookmark editing -->
@@ -102,7 +102,6 @@
 	<!-- Confirmation in downloading countries dialog -->
 	<text id="IDS_ARE_YOU_SURE">Tem a certeza de que pretende continuar?</text>
 	<text id="IDS_SHARE_MY_LOCATION">Partilhar a minha localização</text>
-	<text id="IDS_BECOME_A_PRO">Obter PRO</text>
 	<text id="IDS_PREF_ZOOM_TITLE">Botões de zoom</text>
 	<text id="IDS_PREF_ZOOM_SUMMARY">Mostrar no ecrã</text>
 	<!-- Search Suggestion -->
@@ -141,7 +140,7 @@
 	<text id="IDS_DOWNLOADER_DELETE_ROUTING">Apagar Roteamento</text>
 	<!-- Context menu item for downloader. -->
 	<text id="IDS_DOWNLOADER_DOWNLOAD_MAP">Baixar o mapa</text>
-	<!-- Button for routing PP. -->
+	<!-- Button for routing. -->
 	<text id="IDS_ROUTING_GO">Avançar!</text>
 	<!-- Item status in downloader. -->
 	<text id="IDS_DOWNLOADER_RETRY">Tentar de novo</text>

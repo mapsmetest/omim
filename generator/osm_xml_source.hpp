@@ -16,9 +16,9 @@ class XMLSource
 public:
   XMLSource(TEmmiterFn fn) : m_EmmiterFn(fn) {}
 
-  void CharData(string const &) {}
+  void CharData(std::string const &) {}
 
-  void AddAttr(string const & key, string const & value)
+  void AddAttr(std::string const & key, std::string const & value)
   {
     if (!m_current)
       return;
@@ -41,7 +41,7 @@ public:
       m_current->role = value;
   }
 
-  bool Push(string const & tagName)
+  bool Push(std::string const & tagName)
   {
     ASSERT_GREATER_OR_EQUAL(tagName.size(), 2, ());
 
@@ -64,7 +64,7 @@ public:
     return true;
   }
 
-  void Pop(string const & v)
+  void Pop(std::string const & v)
   {
     switch (--m_depth)
     {
@@ -78,17 +78,18 @@ public:
 
       default:
         switch (m_child.type)
-      {
-        case OsmElement::EntityType::Member:
-          m_parent.AddMember(m_child.ref, m_child.memberType, m_child.role);
-          break;
-        case OsmElement::EntityType::Tag:
-          m_parent.AddTag(m_child.k, m_child.v);
-          break;
-        case OsmElement::EntityType::Nd:
-          m_parent.AddNd(m_child.ref);
-        default: break;
-      }
+        {
+          case OsmElement::EntityType::Member:
+            m_parent.AddMember(m_child.ref, m_child.memberType, m_child.role);
+            break;
+          case OsmElement::EntityType::Tag:
+            m_parent.AddTag(m_child.k, m_child.v);
+            break;
+          case OsmElement::EntityType::Nd:
+            m_parent.AddNd(m_child.ref);
+          default:
+            break;
+        }
         m_current = &m_parent;
         m_child.Clear();
     }

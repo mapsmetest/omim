@@ -3,67 +3,11 @@ package com.mapswithme.util.concurrency;
 import android.os.Handler;
 import android.os.Looper;
 
-import com.mapswithme.util.Proc;
+import com.mapswithme.util.Utils;
 
 public class UiThread
 {
   private static final Handler sUiHandler = new Handler(Looper.getMainLooper());
-
-  /**
-   * Helper runnable classes that can be scheduled at any thread but will be started on UI thread only.
-   */
-  public static abstract class UiRunnable implements Runnable
-  {
-    @Override
-    public final void run()
-    {
-      if (currentThreadIsUi())
-        runUi();
-      else
-        UiThread.run(this);
-    }
-
-    protected abstract void runUi();
-  }
-
-  public static abstract class UiProc<T> implements Proc<T>
-  {
-    @Override
-    public final void invoke(final T param)
-    {
-      if (currentThreadIsUi())
-        invokeUi(param);
-      else
-        UiThread.run(new Runnable()
-        {
-          @Override
-          public void run()
-          {
-            invokeUi(param);
-          }
-        });
-    }
-
-    protected abstract void invokeUi(T param);
-  }
-
-  /**
-   * Checks if we currently on UI thread. Throws IllegalStateException if called not from UI thread.
-   */
-  public static void checkUi()
-  {
-    if (!currentThreadIsUi())
-      throw new IllegalStateException("Method should be called from UI thread.");
-  }
-
-  /**
-   * Checks if we currently not on UI thread. Throws IllegalStateException if called from UI thread.
-   */
-  public static void checkNotUi()
-  {
-    if (currentThreadIsUi())
-      throw new IllegalStateException("Method should NOT be called from UI thread.");
-  }
 
   public static boolean currentThreadIsUi()
   {
@@ -94,14 +38,14 @@ public class UiThread
   }
 
   /**
-   * Executes something on UI thread after a given delay.
+   * Executes something on UI thread after a given delayMillis.
    *
-   * @param task  the code that must be executed on UI thread after given delay.
-   * @param delay The delay (in milliseconds) until the code will be executed.
+   * @param task  the code that must be executed on UI thread after given delayMillis.
+   * @param delayMillis The delayMillis until the code will be executed.
    */
-  public static void runLater(Runnable task, long delay)
+  public static void runLater(Runnable task, long delayMillis)
   {
-    sUiHandler.postDelayed(task, delay);
+    sUiHandler.postDelayed(task, delayMillis);
   }
 
   /**

@@ -1,8 +1,10 @@
-WorldCoasts.mwm 4548233
-World.mwm 26567868
+WorldCoasts.mwm 4658499
+WorldCoasts_obsolete.mwm 4513802
+World.mwm 30460435
 01_dejavusans.ttf 633604
 02_droidsans-fallback.ttf 4033420
 03_jomolhari-id-a3d.ttf 1817160
 04_padauk.ttf 248076
 05_khmeros.ttf 265552
 06_code2000.ttf 3155104
+07_roboto_medium.ttf 162588

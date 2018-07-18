@@ -1,35 +1,38 @@
 #import "DownloadIndicatorProtocol.h"
-#import "MapsObservers.h"
-#import "NavigationController.h"
-
-#include "indexer/map_style.hpp"
+#import "MWMMyTarget.h"
+#import "MWMNavigationController.h"
 
 @class MapViewController;
-@class LocationManager;
 
-@interface MapsAppDelegate : UIResponder<UIApplicationDelegate, UIAlertViewDelegate,
-                                         ActiveMapsObserverProtocol, DownloadIndicatorProtocol>
+@interface MapsAppDelegate : UIResponder<UIApplicationDelegate, DownloadIndicatorProtocol>
 {
   NSInteger m_activeDownloadsCounter;
   UIBackgroundTaskIdentifier m_backgroundTask;
-  UIAlertView * m_loadingAlertView;
 }
 
-@property (nonatomic) UIWindow * window;
+@property(nonatomic) UIWindow * window;
 
-@property (nonatomic, readonly) MapViewController * mapViewController;
-@property (nonatomic, readonly) LocationManager * m_locationManager;
+@property(nonatomic, readonly) MapViewController * mapViewController;
+@property(nonatomic, readonly) BOOL isDrapeEngineCreated;
+
+@property(nonatomic) MWMMyTarget * myTarget;
 
 + (MapsAppDelegate *)theApp;
 
+- (BOOL)hasApiURL;
+
 - (void)enableStandby;
 - (void)disableStandby;
+
++ (void)customizeAppearance;
++ (void)customizeAppearanceForNavigationBar:(UINavigationBar *)navigationBar;
 
 - (void)disableDownloadIndicator;
 - (void)enableDownloadIndicator;
 
 - (void)showMap;
+- (void)showAlertIfRequired;
 
-- (void)setMapStyle:(MapStyle)mapStyle;
+- (NSUInteger)badgeNumber;
 
 @end

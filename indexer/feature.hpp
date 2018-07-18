@@ -1,5 +1,6 @@
 #pragma once
 #include "indexer/cell_id.hpp"
+#include "indexer/feature_altitude.hpp"
 #include "indexer/feature_data.hpp"
 
 #include "geometry/point2d.hpp"
@@ -7,31 +8,38 @@
 
 #include "base/buffer_vector.hpp"
 
+#include "std/iterator.hpp"
 #include "std/string.hpp"
+#include "std/utility.hpp"
 
 
 namespace feature
 {
-  class LoaderBase;
-  class LoaderCurrent;
+class LoaderBase;
+class LoaderCurrent;
 }
 
-namespace old_101 { namespace feature
+namespace old_101
 {
-  class LoaderImpl;
-}}
+namespace feature
+{
+class LoaderImpl;
+}
+}
 
+namespace osm
+{
+class EditableMapObject;
+}
 
 /// Base feature class for storing common data (without geometry).
 class FeatureBase
 {
-  static const int m_maxTypesCount = feature::max_types_count;
-
 public:
 
-  typedef char const * BufferT;
+  using TBuffer = char const *;
 
-  void Deserialize(feature::LoaderBase * pLoader, BufferT buffer);
+  void Deserialize(feature::LoaderBase * pLoader, TBuffer buffer);
 
   /// @name Parse functions. Do simple dispatching to m_pLoader.
   //@{
@@ -40,6 +48,7 @@ public:
   //@}
 
   feature::EGeomType GetFeatureType() const;
+  FeatureParamsBase & GetParams() {return m_params;}
 
   inline uint8_t GetTypesCount() const
   {
@@ -80,13 +89,13 @@ public:
   */
 
   template <class T>
-  inline bool ForEachNameRef(T & functor) const
+  inline bool ForEachName(T && fn) const
   {
     if (!HasName())
       return false;
 
     ParseCommon();
-    m_params.name.ForEachRef(functor);
+    m_params.name.ForEach(forward<T>(fn));
     return true;
   }
 
@@ -104,7 +113,7 @@ public:
   }
 
   template <typename ToDo>
-  void ForEachType(ToDo f) const
+  void ForEachType(ToDo && f) const
   {
     ParseTypes();
 
@@ -112,6 +121,8 @@ public:
     for (size_t i = 0; i < count; ++i)
       f(m_types[i]);
   }
+
+  void SetTypes(uint32_t const (&types)[feature::kMaxTypesCount], uint32_t count);
 
 protected:
   /// @name Need for FeatureBuilder.
@@ -127,9 +138,9 @@ protected:
 protected:
   feature::LoaderBase * m_pLoader;
 
-  uint8_t m_header;
+  uint8_t m_header = 0;
 
-  mutable uint32_t m_types[m_maxTypesCount];
+  mutable uint32_t m_types[feature::kMaxTypesCount];
 
   mutable FeatureParamsBase m_params;
 
@@ -137,7 +148,8 @@ protected:
 
   mutable m2::RectD m_limitRect;
 
-  mutable bool m_bTypesParsed, m_bCommonParsed;
+  mutable bool m_typesParsed = false;
+  mutable bool m_commonParsed = false;
 
   friend class feature::LoaderCurrent;
   friend class old_101::feature::LoaderImpl;
@@ -151,13 +163,33 @@ class FeatureType : public FeatureBase
   FeatureID m_id;
 
 public:
-  void Deserialize(feature::LoaderBase * pLoader, BufferT buffer);
+  void Deserialize(feature::LoaderBase * pLoader, TBuffer buffer);
+
+  /// @name Editor methods.
+  //@{
+  /// Apply changes from UI for edited or newly created features.
+  /// Replaces all FeatureType's components.
+  void ReplaceBy(osm::EditableMapObject const & ef);
+
+  StringUtf8Multilang const & GetNames() const;
+  void SetNames(StringUtf8Multilang const & newNames);
+  void SetMetadata(feature::Metadata const & newMetadata);
+
+  void UpdateHeader(bool commonParsed, bool metadataParsed);
+  bool UpdateMetadataValue(string const & key, string const & value);
+  void ForEachMetadataItem(bool skipSponsored,
+                           function<void(string const & tag, string const & value)> const & fn) const;
+
+  void SetCenter(m2::PointD const &pt);
+  //@}
 
   inline void SetID(FeatureID const & id) { m_id = id; }
-  inline FeatureID GetID() const { return m_id; }
+  inline FeatureID const & GetID() const { return m_id; }
 
   /// @name Parse functions. Do simple dispatching to m_pLoader.
   //@{
+  /// Super-method to call all possible Parse* methods.
+  void ParseEverything() const;
   void ParseHeader2() const;
 
   void ResetGeometry() const;
@@ -176,8 +208,8 @@ public:
 
   bool IsEmptyGeometry(int scale) const;
 
-  template <typename FunctorT>
-  void ForEachPointRef(FunctorT & f, int scale) const
+  template <typename TFunctor>
+  void ForEachPoint(TFunctor && f, int scale) const
   {
     ParseGeometry(scale);
 
@@ -196,24 +228,19 @@ public:
 
   inline size_t GetPointsCount() const
   {
-    ASSERT(m_bPointsParsed, ());
+    ASSERT(m_pointsParsed, ());
     return m_points.size();
   }
+
   inline m2::PointD const & GetPoint(size_t i) const
   {
     ASSERT_LESS(i, m_points.size(), ());
-    ASSERT(m_bPointsParsed, ());
+    ASSERT(m_pointsParsed, ());
     return m_points[i];
   }
 
-  template <typename FunctorT>
-  void ForEachPoint(FunctorT f, int scale) const
-  {
-    ForEachPointRef(f, scale);
-  }
-
-  template <typename FunctorT>
-  void ForEachTriangleRef(FunctorT & f, int scale) const
+  template <typename TFunctor>
+  void ForEachTriangle(TFunctor && f, int scale) const
   {
     ParseTriangles(scale);
 
@@ -224,17 +251,17 @@ public:
     }
   }
 
-  template <typename FunctorT>
-  void ForEachTriangle(FunctorT f, int scale) const
+  inline vector<m2::PointD> GetTriangesAsPoints(int scale) const
   {
-    ForEachTriangleRef(f, scale);
+    ParseTriangles(scale);
+    return {begin(m_triangles), end(m_triangles)};
   }
 
-  template <typename FunctorT>
-  void ForEachTriangleExRef(FunctorT & f, int scale) const
+  template <typename TFunctor>
+  void ForEachTriangleEx(TFunctor && f, int scale) const
   {
     f.StartPrimitive(m_triangles.size());
-    ForEachTriangleRef(f, scale);
+    ForEachTriangle(forward<TFunctor>(f), scale);
     f.EndPrimitive();
   }
   //@}
@@ -244,6 +271,8 @@ public:
   friend string DebugPrint(FeatureType const & ft);
 
   string GetHouseNumber() const;
+  /// Needed for Editor, to change house numbers in runtime.
+  void SetHouseNumber(string const & number);
 
   /// @name Get names for feature.
   /// @param[out] defaultName corresponds to osm tag "name"
@@ -251,22 +280,30 @@ public:
   //@{
   /// Just get feature names.
   void GetPreferredNames(string & defaultName, string & intName) const;
+  void GetPreferredNames(bool allowTranslit, int8_t deviceLang, string & defaultName, string & intName) const;
   /// Get one most suitable name for user.
   void GetReadableName(string & name) const;
+  void GetReadableName(bool allowTranslit, int8_t deviceLang, string & name) const;
 
-  static int8_t const DEFAULT_LANG = StringUtf8Multilang::DEFAULT_CODE;
+  static int8_t const DEFAULT_LANG = StringUtf8Multilang::kDefaultCode;
   bool GetName(int8_t lang, string & name) const;
   //@}
 
   uint8_t GetRank() const;
-  uint32_t GetPopulation() const;
+  uint64_t GetPopulation() const;
   string GetRoadNumber() const;
-  bool HasInternet() const;
 
-  inline feature::Metadata const & GetMetadata() const { return m_metadata; }
-  inline feature::Metadata & GetMetadata() { return m_metadata; }
+  inline feature::Metadata const & GetMetadata() const
+  {
+    ParseMetadata();
+    return m_metadata;
+  }
 
-  double GetDistance(m2::PointD const & pt, int scale) const;
+  inline feature::Metadata & GetMetadata()
+  {
+    ParseMetadata();
+    return m_metadata;
+  }
 
   /// @name Statistic functions.
   //@{
@@ -307,12 +344,12 @@ public:
 
   inline void SwapPoints(buffer_vector<m2::PointD, 32> & points) const
   {
-    ASSERT(m_bPointsParsed, ());
+    ASSERT(m_pointsParsed, ());
     return m_points.swap(points);
   }
 
 private:
-  void ParseAll(int scale) const;
+  void ParseGeometryAndTriangles(int scale) const;
 
   // For better result this value should be greater than 17
   // (number of points in inner triangle-strips).
@@ -322,7 +359,10 @@ private:
   mutable points_t m_points, m_triangles;
   mutable feature::Metadata m_metadata;
 
-  mutable bool m_bHeader2Parsed, m_bPointsParsed, m_bTrianglesParsed, m_bMetadataParsed;
+  mutable bool m_header2Parsed = false;
+  mutable bool m_pointsParsed = false;
+  mutable bool m_trianglesParsed = false;
+  mutable bool m_metadataParsed = false;
 
   mutable inner_geom_stat_t m_innerStats;
 

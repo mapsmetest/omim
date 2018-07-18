@@ -1,32 +1,22 @@
 #include "testing/testing.hpp"
 
+#include "types_helper.hpp"
+
+#include "platform/platform.hpp"
+
 #include "generator/osm_element.hpp"
 #include "generator/osm2type.hpp"
+#include "generator/tag_admixer.hpp"
 
-#include "routing/car_model.hpp"
+#include "routing_common/car_model.hpp"
 
 #include "indexer/feature_data.hpp"
 #include "indexer/classificator.hpp"
 #include "indexer/classificator_loader.hpp"
 
-#include "std/iostream.hpp"
+#include <iostream>
 
-
-namespace
-{
-  void FillXmlElement(char const * arr[][2], size_t count, OsmElement * p)
-  {
-    for (size_t i = 0; i < count; ++i)
-      p->AddTag(arr[i][0], arr[i][1]);
-  }
-
-  template <size_t N> uint32_t GetType(char const * (&arr)[N])
-  {
-    vector<string> path(arr, arr + N);
-    return classif().GetTypeByPath(path);
-  }
-  uint32_t GetType(StringIL const & lst) { return classif().GetTypeByPath(lst); }
-}
+using namespace tests;
 
 UNIT_TEST(OsmType_SkipDummy)
 {
@@ -52,11 +42,11 @@ UNIT_TEST(OsmType_SkipDummy)
 
 namespace
 {
-  void DumpTypes(vector<uint32_t> const & v)
+  void DumpTypes(std::vector<uint32_t> const & v)
   {
     Classificator const & c = classif();
     for (size_t i = 0; i < v.size(); ++i)
-      cout << c.GetFullObjectName(v[i]) << endl;
+      std::cout << c.GetFullObjectName(v[i]) << std::endl;
   }
 
   void DumpParsedTypes(char const * arr[][2], size_t count)
@@ -68,6 +58,30 @@ namespace
     ftype::GetNameAndType(&e, params);
 
     DumpTypes(params.m_Types);
+  }
+
+  void TestSurfaceTypes(std::string const & surface, std::string const & smoothness,
+                        std::string const & grade, char const * value)
+  {
+    OsmElement e;
+    e.AddTag("highway", "unclassified");
+    e.AddTag("surface", surface);
+    e.AddTag("smoothness", smoothness);
+    e.AddTag("surface:grade", grade);
+
+    FeatureParams params;
+    ftype::GetNameAndType(&e, params);
+
+    TEST_EQUAL(params.m_Types.size(), 2, (params));
+    TEST(params.IsTypeExist(GetType({"highway", "unclassified"})), ());
+    std::string psurface;
+    for (auto type : params.m_Types)
+    {
+      std::string const rtype = classif().GetReadableObjectName(type);
+      if (rtype.substr(0, 9) == "psurface-")
+        psurface = rtype.substr(9);
+    }
+    TEST(params.IsTypeExist(GetType({"psurface", value})), ("Surface:", surface, "Smoothness:", smoothness, "Grade:", grade, "Expected:", value, "Got:", psurface));
   }
 }
 
@@ -128,7 +142,7 @@ UNIT_TEST(OsmType_Combined)
   TEST(params.IsTypeExist(GetType(arr[3])), ());
   TEST(params.IsTypeExist(GetType({"building"})), ());
 
-  string s;
+  std::string s;
   params.name.GetString(0, s);
   TEST_EQUAL(s, arr[5][1], ());
 
@@ -182,7 +196,7 @@ UNIT_TEST(OsmType_PlaceState)
   TEST_EQUAL(params.m_Types.size(), 1, (params));
   TEST(params.IsTypeExist(GetType({"place", "state", "USA"})), ());
 
-  string s;
+  std::string s;
   TEST(params.name.GetString(0, s), ());
   TEST_EQUAL(s, "California", ());
   TEST_GREATER(params.rank, 1, ());
@@ -241,6 +255,7 @@ UNIT_TEST(OsmType_Synonyms)
       { "building", "yes" },
       { "shop", "yes" },
       { "atm", "yes" },
+      { "toilets", "yes" },
       { "restaurant", "yes" },
       { "hotel", "yes" },
     };
@@ -248,6 +263,9 @@ UNIT_TEST(OsmType_Synonyms)
     OsmElement e;
     FillXmlElement(arr, ARRAY_SIZE(arr), &e);
 
+    TagReplacer tagReplacer(GetPlatform().ResourcesDir() + REPLACED_TAGS_FILE);
+    tagReplacer(&e);
+    
     FeatureParams params;
     ftype::GetNameAndType(&e, params);
 
@@ -256,13 +274,15 @@ UNIT_TEST(OsmType_Synonyms)
     char const * arrT3[] = { "shop" };
     char const * arrT4[] = { "amenity", "restaurant" };
     char const * arrT5[] = { "tourism", "hotel" };
-    TEST_EQUAL(params.m_Types.size(), 5, (params));
+    char const * arrT6[] = { "amenity", "toilets" };
+    TEST_EQUAL(params.m_Types.size(), 6, (params));
 
     TEST(params.IsTypeExist(GetType(arrT1)), ());
     TEST(params.IsTypeExist(GetType(arrT2)), ());
     TEST(params.IsTypeExist(GetType(arrT3)), ());
     TEST(params.IsTypeExist(GetType(arrT4)), ());
     TEST(params.IsTypeExist(GetType(arrT5)), ());
+    TEST(params.IsTypeExist(GetType(arrT6)), ());
   }
 
   // Duplicating test.
@@ -340,7 +360,7 @@ UNIT_TEST(OsmType_Capital)
   {
     char const * arr[][2] = {
       { "place", "city" },
-      { "admin_level", "6" },
+      { "admin_level", "4" },
       { "boundary", "administrative" },
       { "capital", "2" },
       { "place", "city" },
@@ -354,7 +374,7 @@ UNIT_TEST(OsmType_Capital)
 
     TEST_EQUAL(params.m_Types.size(), 2, (params));
     TEST(params.IsTypeExist(GetType({"place", "city", "capital", "2"})), ());
-    TEST(params.IsTypeExist(GetType({"boundary", "administrative", "6"})), ());
+    TEST(params.IsTypeExist(GetType({"boundary", "administrative", "4"})), ());
   }
 }
 
@@ -490,6 +510,7 @@ UNIT_TEST(OsmType_Hwtag)
 {
   char const * tags[][2] = {
       {"hwtag", "oneway"}, {"hwtag", "private"}, {"hwtag", "lit"}, {"hwtag", "nofoot"}, {"hwtag", "yesfoot"},
+      {"hwtag", "yesbicycle"}, {"hwtag", "bidir_bicycle"}
   };
 
   {
@@ -516,6 +537,8 @@ UNIT_TEST(OsmType_Hwtag)
         {"access", "private"},
         {"lit", "no"},
         {"foot", "no"},
+        {"bicycle", "yes"},
+        {"oneway:bicycle", "no"},
     };
 
     OsmElement e;
@@ -524,16 +547,18 @@ UNIT_TEST(OsmType_Hwtag)
     FeatureParams params;
     ftype::GetNameAndType(&e, params);
 
-    TEST_EQUAL(params.m_Types.size(), 4, (params));
+    TEST_EQUAL(params.m_Types.size(), 6, (params));
     TEST(params.IsTypeExist(GetType(arr[1])), ());
     TEST(params.IsTypeExist(GetType(tags[0])), ());
     TEST(params.IsTypeExist(GetType(tags[1])), ());
     TEST(params.IsTypeExist(GetType(tags[3])), ());
+    TEST(params.IsTypeExist(GetType(tags[5])), ());
+    TEST(params.IsTypeExist(GetType(tags[6])), ());
   }
 
   {
     char const * arr[][2] = {
-        {"foot", "yes"}, {"highway", "primary"},
+        {"foot", "yes"}, {"cycleway", "lane"}, {"highway", "primary"},
     };
 
     OsmElement e;
@@ -542,15 +567,36 @@ UNIT_TEST(OsmType_Hwtag)
     FeatureParams params;
     ftype::GetNameAndType(&e, params);
 
-    TEST_EQUAL(params.m_Types.size(), 2, (params));
-    TEST(params.IsTypeExist(GetType(arr[1])), ());
+    TEST_EQUAL(params.m_Types.size(), 3, (params));
+    TEST(params.IsTypeExist(GetType(arr[2])), ());
     TEST(params.IsTypeExist(GetType(tags[4])), ());
+    TEST(params.IsTypeExist(GetType(tags[5])), ());
   }
+}
+
+UNIT_TEST(OsmType_Surface)
+{
+  TestSurfaceTypes("asphalt", "", "", "paved_good");
+  TestSurfaceTypes("asphalt", "bad", "", "paved_bad");
+  TestSurfaceTypes("asphalt", "", "0", "paved_bad");
+  TestSurfaceTypes("paved", "", "2", "paved_good");
+  TestSurfaceTypes("", "excellent", "", "paved_good");
+  TestSurfaceTypes("wood", "", "", "paved_bad");
+  TestSurfaceTypes("wood", "good", "", "paved_good");
+  TestSurfaceTypes("wood", "", "3", "paved_good");
+  TestSurfaceTypes("unpaved", "", "", "unpaved_good");
+  TestSurfaceTypes("mud", "", "", "unpaved_bad");
+  TestSurfaceTypes("", "bad", "", "unpaved_good");
+  TestSurfaceTypes("", "horrible", "", "unpaved_bad");
+  TestSurfaceTypes("ground", "", "1", "unpaved_bad");
+  TestSurfaceTypes("mud", "", "3", "unpaved_good");
+  TestSurfaceTypes("unknown", "", "", "unpaved_good");
+  TestSurfaceTypes("", "unknown", "", "unpaved_good");
 }
 
 UNIT_TEST(OsmType_Ferry)
 {
-  routing::CarModel carModel;
+  routing::CarModel const & carModel = routing::CarModel::AllLimitsInstance();
 
   char const * arr[][2] = {
     { "motorcar", "yes" },
@@ -565,25 +611,28 @@ UNIT_TEST(OsmType_Ferry)
   FeatureParams params;
   ftype::GetNameAndType(&e, params);
 
-  TEST_EQUAL(params.m_Types.size(), 2, (params));
+  TEST_EQUAL(params.m_Types.size(), 3, (params));
 
   uint32_t type = GetType({"highway", "primary", "bridge"});
   TEST(params.IsTypeExist(type), ());
-  TEST(carModel.IsRoad(type), ());
+  TEST(carModel.IsRoadType(type), ());
 
   type = GetType({"route", "ferry", "motorcar"});
   TEST(params.IsTypeExist(type), ());
-  TEST(carModel.IsRoad(type), ());
+  TEST(carModel.IsRoadType(type), ());
 
   type = GetType({"route", "ferry"});
   TEST(!params.IsTypeExist(type), ());
-  TEST(!carModel.IsRoad(type), ());
+  TEST(carModel.IsRoadType(type), ());
+
+  type = GetType({"hwtag", "yescar"});
+  TEST(params.IsTypeExist(type), ());
 }
 
 UNIT_TEST(OsmType_Boundary)
 {
   char const * arr[][2] = {
-    { "admin_level", "6" },
+    { "admin_level", "4" },
     { "boundary", "administrative" },
     { "admin_level", "2" },
     { "boundary", "administrative" },
@@ -597,7 +646,7 @@ UNIT_TEST(OsmType_Boundary)
 
   TEST_EQUAL(params.m_Types.size(), 2, (params));
   TEST(params.IsTypeExist(GetType({"boundary", "administrative", "2"})), ());
-  TEST(params.IsTypeExist(GetType({"boundary", "administrative", "6"})), ());
+  TEST(params.IsTypeExist(GetType({"boundary", "administrative", "4"})), ());
 }
 
 UNIT_TEST(OsmType_Dibrugarh)
@@ -622,8 +671,8 @@ UNIT_TEST(OsmType_Dibrugarh)
 
   TEST_EQUAL(params.m_Types.size(), 1, (params));
   TEST(params.IsTypeExist(GetType({"place", "city"})), (params));
-  string name;
-  TEST(params.name.GetString(StringUtf8Multilang::DEFAULT_CODE, name), (params));
+  std::string name;
+  TEST(params.name.GetString(StringUtf8Multilang::kDefaultCode, name), (params));
   TEST_EQUAL(name, "Dibrugarh", (params));
 }
 
@@ -663,7 +712,7 @@ UNIT_TEST(OsmType_Subway)
     FeatureParams params;
     ftype::GetNameAndType(&e, params);
 
-    TEST_EQUAL(params.m_Types.size(), 1, (params));
+    TEST_EQUAL(params.m_Types.size(), 2, (params));
     TEST(params.IsTypeExist(GetType({"railway", "station", "subway", "newyork"})), (params));
   }
 
@@ -727,4 +776,130 @@ UNIT_TEST(OsmType_Subway)
     TEST_EQUAL(params.m_Types.size(), 1, (params));
     TEST(params.IsTypeExist(GetType({"railway", "station", "subway", "london"})), (params));
   }
+}
+
+UNIT_TEST(OsmType_Hospital)
+{
+  {
+    char const * arr[][2] = {
+      { "building", "hospital" },
+    };
+
+    OsmElement e;
+    FillXmlElement(arr, ARRAY_SIZE(arr), &e);
+
+    FeatureParams params;
+    ftype::GetNameAndType(&e, params);
+
+    TEST_EQUAL(params.m_Types.size(), 1, (params));
+    TEST(params.IsTypeExist(GetType({"building"})), (params));
+  }
+
+  {
+    char const * arr[][2] = {
+      { "building", "yes" },
+      { "amenity", "hospital" },
+    };
+
+    OsmElement e;
+    FillXmlElement(arr, ARRAY_SIZE(arr), &e);
+
+    FeatureParams params;
+    ftype::GetNameAndType(&e, params);
+
+    TEST_EQUAL(params.m_Types.size(), 2, (params));
+    TEST(params.IsTypeExist(GetType({"building"})), (params));
+    TEST(params.IsTypeExist(GetType({"amenity", "hospital"})), (params));
+  }
+}
+
+UNIT_TEST(OsmType_Entrance)
+{
+  {
+    char const * arr[][2] = {
+      { "building", "entrance" },
+      { "barrier", "entrance" },
+    };
+
+    OsmElement e;
+    FillXmlElement(arr, ARRAY_SIZE(arr), &e);
+
+    TagReplacer tagReplacer(GetPlatform().ResourcesDir() + REPLACED_TAGS_FILE);
+    tagReplacer(&e);
+
+    FeatureParams params;
+    ftype::GetNameAndType(&e, params);
+
+    TEST_EQUAL(params.m_Types.size(), 2, (params));
+    TEST(params.IsTypeExist(GetType({"entrance"})), (params));
+    TEST(params.IsTypeExist(GetType({"barrier", "entrance"})), (params));
+  }
+}
+
+UNIT_TEST(OsmType_Moscow)
+{
+  {
+    char const * arr[][2] = {
+      { "addr:country", "RU" },
+      { "addr:region", "Москва" },
+      { "admin_level", "2" },
+      { "alt_name:vi", "Mạc Tư Khoa" },
+      { "capital", "yes" },
+      { "ele", "156" },
+      { "int_name", "Moscow" },
+      { "is_capital", "country" },
+      { "ISO3166-2", "RU-MOW" },
+      { "name", "Москва" },
+      { "note", "эта точка должна быть здесь, в историческом центре Москвы" },
+      { "official_status", "ru:город" },
+      { "okato:user", "none" },
+      { "place", "city" },
+      { "population", "12108257" },
+      { "population:date", "2014-01-01" },
+      { "rank", "0" },
+      { "wikipedia", "ru:Москва" },
+    };
+
+    OsmElement e;
+    FillXmlElement(arr, ARRAY_SIZE(arr), &e);
+
+    FeatureParams params;
+    ftype::GetNameAndType(&e, params);
+
+    TEST_EQUAL(params.m_Types.size(), 1, (params));
+    TEST(params.IsTypeExist(GetType({"place", "city", "capital", "2"})), (params));
+    TEST(170 <= params.rank && params.rank <= 180, (params));
+    TEST(!params.name.IsEmpty(), (params));
+  }
+}
+
+UNIT_TEST(OsmType_Translations)
+{
+  char const * arr[][2] = {
+    { "name", "Paris" },
+    { "name:ru", "Париж" },
+    { "name:en", "Paris" },
+    { "name:en:pronunciation", "ˈpæɹ.ɪs" },
+    { "name:fr:pronunciation", "paʁi" },
+    { "place", "city" },
+    { "population", "2243833" }
+  };
+
+  OsmElement e;
+  FillXmlElement(arr, ARRAY_SIZE(arr), &e);
+
+  FeatureParams params;
+  ftype::GetNameAndType(&e, params);
+
+  TEST_EQUAL(params.m_Types.size(), 1, (params));
+  TEST(params.IsTypeExist(GetType({"place", "city"})), ());
+
+  std::string name;
+  TEST(params.name.GetString(StringUtf8Multilang::kDefaultCode, name), (params));
+  TEST_EQUAL(name, "Paris", (params));
+  TEST(params.name.GetString(StringUtf8Multilang::kEnglishCode, name), (params));
+  TEST_EQUAL(name, "Paris", (params));
+  TEST(!params.name.GetString("fr", name), (params));
+  TEST(params.name.GetString("ru", name), (params));
+  TEST_EQUAL(name, "Париж", (params));
 }

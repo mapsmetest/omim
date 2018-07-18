@@ -1,80 +1,131 @@
 #pragma once
 
-#include "drape_frontend/message_acceptor.hpp"
-#include "drape_frontend/engine_context.hpp"
-#include "drape_frontend/viewport.hpp"
+#include "drape_frontend/gui/layer_render.hpp"
+
+#include "drape_frontend/base_renderer.hpp"
+#include "drape_frontend/batchers_pool.hpp"
+#include "drape_frontend/drape_api_builder.hpp"
 #include "drape_frontend/map_data_provider.hpp"
+#include "drape_frontend/overlay_batcher.hpp"
+#include "drape_frontend/requested_tiles.hpp"
+#include "drape_frontend/traffic_generator.hpp"
+#include "drape_frontend/transit_scheme_builder.hpp"
+#include "drape_frontend/user_mark_generator.hpp"
 
 #include "drape/pointers.hpp"
-
-#include "base/thread.hpp"
+#include "drape/viewport.hpp"
 
 namespace dp
 {
-
 class OGLContextFactory;
 class TextureManager;
-
-}
+}  // namespace dp
 
 namespace df
 {
-
 class Message;
-class ThreadsCommutator;
-class BatchersPool;
 class ReadManager;
+class RouteBuilder;
+class MetalineManager;
 
-class BackendRenderer : public MessageAcceptor
+using TIsUGCFn = function<bool (FeatureID const &)>;
+
+class BackendRenderer : public BaseRenderer
 {
 public:
-  BackendRenderer(dp::RefPointer<ThreadsCommutator> commutator,
-                  dp::RefPointer<dp::OGLContextFactory> oglcontextfactory,
-                  MapDataProvider const & model);
+  using TUpdateCurrentCountryFn = function<void (m2::PointD const &, int)>;
 
+  struct Params : BaseRenderer::Params
+  {
+    Params(dp::ApiVersion apiVersion, ref_ptr<ThreadsCommutator> commutator,
+           ref_ptr<dp::OGLContextFactory> factory, ref_ptr<dp::TextureManager> texMng,
+           MapDataProvider const & model, TUpdateCurrentCountryFn const & updateCurrentCountryFn,
+           ref_ptr<RequestedTiles> requestedTiles, bool allow3dBuildings, bool trafficEnabled,
+           bool simplifiedTrafficColors, TIsUGCFn && isUGCFn)
+      : BaseRenderer::Params(apiVersion, commutator, factory, texMng)
+      , m_model(model)
+      , m_updateCurrentCountryFn(updateCurrentCountryFn)
+      , m_requestedTiles(requestedTiles)
+      , m_allow3dBuildings(allow3dBuildings)
+      , m_trafficEnabled(trafficEnabled)
+      , m_simplifiedTrafficColors(simplifiedTrafficColors)
+      , m_isUGCFn(std::move(isUGCFn))
+    {
+    }
+
+    MapDataProvider const & m_model;
+    TUpdateCurrentCountryFn m_updateCurrentCountryFn;
+    ref_ptr<RequestedTiles> m_requestedTiles;
+    bool m_allow3dBuildings;
+    bool m_trafficEnabled;
+    bool m_simplifiedTrafficColors;
+    TIsUGCFn m_isUGCFn;
+  };
+
+  BackendRenderer(Params && params);
   ~BackendRenderer() override;
 
-private:
-  MapDataProvider m_model;
-  EngineContext m_engineContext;
-  dp::MasterPointer<BatchersPool> m_batchersPool;
-  dp::MasterPointer<ReadManager>  m_readManager;
+  void Teardown();
 
-  /////////////////////////////////////////
-  //           MessageAcceptor           //
-  /////////////////////////////////////////
-private:
-  void AcceptMessage(dp::RefPointer<Message> message);
+protected:
+  unique_ptr<threads::IRoutine> CreateRoutine() override;
 
-    /////////////////////////////////////////
-    //             ThreadPart              //
-    /////////////////////////////////////////
+  void OnContextCreate() override;
+  void OnContextDestroy() override;
+
 private:
+  void RecacheGui(gui::TWidgetsInitInfo const & initInfo, bool needResetOldGui);
+  void RecacheChoosePositionMark();
+  void RecacheMapShapes();
+
+#ifdef RENDER_DEBUG_INFO_LABELS
+  void RecacheDebugLabels();
+#endif
+
+  void AcceptMessage(ref_ptr<Message> message) override;
+
   class Routine : public threads::IRoutine
   {
-   public:
+  public:
     Routine(BackendRenderer & renderer);
 
-    // threads::IRoutine overrides:
     void Do() override;
 
-   private:
+  private:
     BackendRenderer & m_renderer;
   };
 
-  void StartThread();
-  void StopThread();
   void ReleaseResources();
 
   void InitGLDependentResource();
-  void FlushGeometry(dp::TransferPointer<Message> message);
+  void FlushGeometry(TileKey const & key, dp::GLState const & state, drape_ptr<dp::RenderBucket> && buffer);
 
-private:
-  threads::Thread m_selfThread;
-  dp::RefPointer<ThreadsCommutator> m_commutator;
-  dp::RefPointer<dp::OGLContextFactory> m_contextFactory;
+  void FlushTransitRenderData(TransitRenderData && renderData);
+  void FlushTrafficRenderData(TrafficRenderData && renderData);
+  void FlushUserMarksRenderData(TUserMarksRenderData && renderData);
 
-  dp::MasterPointer<dp::TextureManager> m_textures;
+  void CleanupOverlays(TileKey const & tileKey);
+
+  MapDataProvider m_model;
+  drape_ptr<BatchersPool<TileKey, TileKeyStrictComparator>> m_batchersPool;
+  drape_ptr<ReadManager> m_readManager;
+  drape_ptr<RouteBuilder> m_routeBuilder;
+  drape_ptr<TransitSchemeBuilder> m_transitBuilder;
+  drape_ptr<TrafficGenerator> m_trafficGenerator;
+  drape_ptr<UserMarkGenerator> m_userMarkGenerator;
+  drape_ptr<DrapeApiBuilder> m_drapeApiBuilder;
+  gui::LayerCacher m_guiCacher;
+
+  ref_ptr<RequestedTiles> m_requestedTiles;
+
+  TOverlaysRenderData m_overlays;
+
+  TUpdateCurrentCountryFn m_updateCurrentCountryFn;
+
+  drape_ptr<MetalineManager> m_metalineManager;
+
+#ifdef DEBUG
+  bool m_isTeardowned;
+#endif
 };
-
-} // namespace df
+}  // namespace df

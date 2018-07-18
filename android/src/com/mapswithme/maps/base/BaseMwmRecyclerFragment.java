@@ -1,28 +1,59 @@
 package com.mapswithme.maps.base;
 
-import android.app.Activity;
+import android.content.Context;
 import android.os.Bundle;
+import android.support.annotation.CallSuper;
 import android.support.annotation.LayoutRes;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.support.v4.app.Fragment;
-import android.support.v4.app.NavUtils;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
 import android.support.v7.widget.Toolbar;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import com.mapswithme.maps.R;
-import com.mapswithme.maps.activity.CustomNavigateUpListener;
-import com.mapswithme.util.UiUtils;
 
-public abstract class BaseMwmRecyclerFragment extends Fragment
+import com.mapswithme.maps.R;
+import com.mapswithme.maps.widget.PlaceholderView;
+import com.mapswithme.util.UiUtils;
+import com.mapswithme.util.Utils;
+
+public abstract class BaseMwmRecyclerFragment<T extends RecyclerView.Adapter> extends Fragment
 {
   private Toolbar mToolbar;
-  protected RecyclerView mRecycler;
 
-  protected @LayoutRes int getLayoutRes()
+  @SuppressWarnings("NullableProblems")
+  @NonNull
+  private RecyclerView mRecycler;
+
+  @Nullable
+  private PlaceholderView mPlaceholder;
+
+  @SuppressWarnings("NullableProblems")
+  @NonNull
+  private T mAdapter;
+
+  @NonNull
+  protected abstract T createAdapter();
+
+  @LayoutRes
+  protected int getLayoutRes()
   {
     return R.layout.fragment_recycler;
+  }
+
+  @NonNull
+  protected T getAdapter()
+  {
+    return mAdapter;
+  }
+
+  @Override
+  public void onAttach(Context context)
+  {
+    super.onAttach(context);
+    Utils.detachFragmentIfCoreNotInitialized(context, this);
   }
 
   @Override
@@ -31,31 +62,31 @@ public abstract class BaseMwmRecyclerFragment extends Fragment
     return inflater.inflate(getLayoutRes(), container, false);
   }
 
+  @CallSuper
   @Override
   public void onViewCreated(View view, Bundle savedInstanceState)
   {
     super.onViewCreated(view, savedInstanceState);
 
-    mToolbar = (Toolbar) view.findViewById(R.id.toolbar);
+    mToolbar = view.findViewById(R.id.toolbar);
     if (mToolbar != null)
     {
       UiUtils.showHomeUpButton(mToolbar);
-      mToolbar.setNavigationOnClickListener(new View.OnClickListener()
-      {
-        @Override
-        public void onClick(View v)
-        {
-          navigateUpToParent();
-        }
-      });
+      mToolbar.setNavigationOnClickListener(v -> Utils.navigateToParent(getActivity()));
     }
 
-    mRecycler = (RecyclerView) view.findViewById(R.id.recycler);
+    mRecycler = view.findViewById(R.id.recycler);
     if (mRecycler == null)
       throw new IllegalStateException("RecyclerView not found in layout");
 
     LinearLayoutManager manager = new LinearLayoutManager(view.getContext());
+    manager.setSmoothScrollbarEnabled(true);
     mRecycler.setLayoutManager(manager);
+    mAdapter = createAdapter();
+    mRecycler.setAdapter(mAdapter);
+
+    mPlaceholder = view.findViewById(R.id.placeholder);
+    setupPlaceholder(mPlaceholder);
   }
 
   public Toolbar getToolbar()
@@ -83,12 +114,16 @@ public abstract class BaseMwmRecyclerFragment extends Fragment
     org.alohalytics.Statistics.logEvent("$onPause", this.getClass().getSimpleName());
   }
 
-  public void navigateUpToParent()
+  protected void setupPlaceholder(@Nullable PlaceholderView placeholder) {}
+
+  public void setupPlaceholder()
   {
-    final Activity activity = getActivity();
-    if (activity instanceof CustomNavigateUpListener)
-      ((CustomNavigateUpListener) activity).customOnNavigateUp();
-    else
-      NavUtils.navigateUpFromSameTask(activity);
+    setupPlaceholder(mPlaceholder);
+  }
+
+  public void showPlaceholder(boolean show)
+  {
+    if (mPlaceholder != null)
+      UiUtils.showIf(show, mPlaceholder);
   }
 }

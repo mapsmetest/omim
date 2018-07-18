@@ -1,22 +1,18 @@
-#import "MWMNavigationView.h"
+#import "MWMCircularProgressState.h"
+#import "MWMRouterType.h"
 
 @class MWMNavigationDashboardEntity;
+@class MWMNavigationDashboardManager;
+@class MWMTaxiCollectionView;
 
-@interface MWMRoutePreview : MWMNavigationView
+@interface MWMRoutePreview : UIView
 
-@property (weak, nonatomic) IBOutlet UILabel * status;
-@property (weak, nonatomic) IBOutlet UIButton * pedestrian;
-@property (weak, nonatomic) IBOutlet UIButton * vehicle;
-@property (weak, nonatomic) IBOutlet UILabel * timeLabel;
-@property (weak, nonatomic) IBOutlet UILabel * distanceLabel;
-@property (weak, nonatomic) IBOutlet UILabel * arrivalsLabel;
-@property (weak, nonatomic) IBOutlet UIButton * cancelButton;
+- (void)addToView:(UIView *)superview;
+- (void)remove;
 
-- (void)configureWithEntity:(MWMNavigationDashboardEntity *)entity;
-- (void)statePlaning;
-- (void)stateError;
-
-- (void)setRouteBuildingProgress:(CGFloat)progress;
-- (void)showGoButtonAnimated:(BOOL)show;
+- (void)statePrepare;
+- (void)selectRouter:(MWMRouterType)routerType;
+- (void)router:(MWMRouterType)routerType setState:(MWMCircularProgressState)state;
+- (void)router:(MWMRouterType)routerType setProgress:(CGFloat)progress;
 
 @end

@@ -1,48 +1,62 @@
-#import "Common.h"
-#import "EAGLView.h"
-#import "MapsAppDelegate.h"
 #import "MapViewController.h"
-#import "MWMAlertViewController.h"
+#import "BookmarksVC.h"
+#import "EAGLView.h"
 #import "MWMAPIBar.h"
+#import "MWMAuthorizationCommon.h"
+#import "MWMAuthorizationWebViewLoginViewController.h"
+#import "MWMAutoupdateController.h"
+#import "MWMBookmarksManager.h"
+#import "MWMCommon.h"
+#import "MWMEditBookmarkController.h"
+#import "MWMEditorViewController.h"
+#import "MWMFacilitiesController.h"
+#import "MWMFrameworkListener.h"
+#import "MWMLocationHelpers.h"
+#import "MWMMapDownloadDialog.h"
+#import "MWMMapDownloaderViewController.h"
 #import "MWMMapViewControlsManager.h"
-#import "RouteState.h"
-#import "UIFont+MapsMeFonts.h"
-#import "UIViewController+Navigation.h"
-
-#import "3party/Alohalytics/src/alohalytics_objc.h"
+#import "MWMPlacePageProtocol.h"
+#import "MapsAppDelegate.h"
+#import "SwiftBridge.h"
 
 #include "Framework.h"
-#include "RenderContext.hpp"
 
-#include "anim/controller.hpp"
-#include "gui/controller.hpp"
+#include "drape_frontend/user_event_stream.hpp"
 
-#include "map/country_status_display.hpp"
-#include "map/user_mark.hpp"
+#import <Crashlytics/Crashlytics.h>
 
-#include "platform/file_logging.hpp"
-#include "platform/platform.hpp"
-#include "platform/settings.hpp"
+// If you have a "missing header error" here, then please run configure.sh script in the root repo
+// folder.
+#import "../../../private.h"
 
 extern NSString * const kAlohalyticsTapEventKey = @"$onClick";
+extern NSString * const kMap2OsmLoginSegue = @"Map2OsmLogin";
+extern NSString * const kMap2FBLoginSegue = @"Map2FBLogin";
+extern NSString * const kMap2GoogleLoginSegue = @"Map2GoogleLogin";
 
-typedef NS_ENUM(NSUInteger, ForceRoutingStateChange)
-{
-  ForceRoutingStateChangeNone,
-  ForceRoutingStateChangeRestoreRoute,
-  ForceRoutingStateChangeStartFollowing
-};
-
-typedef NS_ENUM(NSUInteger, UserTouchesAction)
-{
+typedef NS_ENUM(NSUInteger, UserTouchesAction) {
   UserTouchesActionNone,
   UserTouchesActionDrag,
   UserTouchesActionScale
 };
 
+namespace
+{
+NSString * const kDownloaderSegue = @"Map2MapDownloaderSegue";
+NSString * const kMigrationSegue = @"Map2MigrationSegue";
+NSString * const kEditorSegue = @"Map2EditorSegue";
+NSString * const kUDViralAlertWasShown = @"ViralAlertWasShown";
+NSString * const kPP2BookmarkEditingSegue = @"PP2BookmarkEditing";
+NSString * const kHotelFacilitiesSegue = @"Map2FacilitiesSegue";
+
+// The first launch after process started. Used to skip "Not follow, no position" state and to run
+// locator.
+BOOL gIsFirstMyPositionMode = YES;
+}  // namespace
+
 @interface NSValueWrapper : NSObject
 
--(NSValue *)getInnerValue;
+- (NSValue *)getInnerValue;
 
 @end
 
@@ -51,12 +65,8 @@ typedef NS_ENUM(NSUInteger, UserTouchesAction)
   NSValue * m_innerValue;
 }
 
--(NSValue *)getInnerValue
-{
-  return m_innerValue;
-}
-
--(id)initWithValue:(NSValue *)value
+- (NSValue *)getInnerValue { return m_innerValue; }
+- (id)initWithValue:(NSValue *)value
 {
   self = [super init];
   if (self)
@@ -64,400 +74,156 @@ typedef NS_ENUM(NSUInteger, UserTouchesAction)
   return self;
 }
 
--(BOOL)isEqual:(id)anObject
-{
-  return [anObject isMemberOfClass:[NSValueWrapper class]];
-}
-
+- (BOOL)isEqual:(id)anObject { return [anObject isMemberOfClass:[NSValueWrapper class]]; }
 @end
 
-@interface MapViewController ()
+@interface MapViewController ()<MWMFrameworkDrapeObserver, MWMFrameworkStorageObserver,
+                                MWMWelcomePageControllerProtocol, MWMKeyboardObserver>
 
-@property (nonatomic, readwrite) MWMMapViewControlsManager * controlsManager;
-@property (nonatomic) MWMSideMenuState menuRestoreState;
+@property(nonatomic, readwrite) MWMMapViewControlsManager * controlsManager;
 
-@property (nonatomic) ForceRoutingStateChange forceRoutingStateChange;
-@property (nonatomic) BOOL disableStandbyOnLocationStateMode;
+@property(nonatomic) BOOL disableStandbyOnLocationStateMode;
 
-@property (nonatomic) MWMAlertViewController * alertController;
+@property(nonatomic) UserTouchesAction userTouchesAction;
 
-@property (nonatomic) UserTouchesAction userTouchesAction;
+@property(nonatomic) MWMMapDownloadDialog * downloadDialog;
+
+@property(nonatomic) BOOL skipForceTouch;
+
+@property(weak, nonatomic) IBOutlet NSLayoutConstraint * visibleAreaBottom;
+@property(weak, nonatomic) IBOutlet NSLayoutConstraint * visibleAreaKeyboard;
+@property(weak, nonatomic) IBOutlet NSLayoutConstraint * placePageAreaKeyboard;
+@property(weak, nonatomic) IBOutlet NSLayoutConstraint * sideButtonsAreaBottom;
+@property(weak, nonatomic) IBOutlet NSLayoutConstraint * sideButtonsAreaKeyboard;
 
 @end
 
 @implementation MapViewController
 
-#pragma mark - LocationManager Callbacks
-
-- (void)onLocationError:(location::TLocationError)errorCode
-{
-  GetFramework().OnLocationError(errorCode);
-
-  switch (errorCode)
-  {
-    case location::EDenied:
-    {
-      [self.alertController presentLocationAlert];
-      [[MapsAppDelegate theApp].m_locationManager stop:self];
-      break;
-    }
-    case location::ENotSupported:
-    {
-      [self.alertController presentLocationServiceNotSupportedAlert];
-      [[MapsAppDelegate theApp].m_locationManager stop:self];
-      break;
-    }
-    default:
-      break;
-  }
-}
-
-- (void)onLocationUpdate:(location::GpsInfo const &)info
-{
-  // TODO: Remove this hack for location changing bug
-  if (self.navigationController.visibleViewController == self)
-  {
-    if (info.m_source != location::EPredictor)
-      [m_predictor reset:info];
-    Framework & frm = GetFramework();
-    frm.OnLocationUpdate(info);
-    LOG_MEMORY_INFO();
-
-    [self showPopover];
-    [self updateRoutingInfo];
-
-    if (self.forceRoutingStateChange == ForceRoutingStateChangeRestoreRoute)
-      [self restoreRoute];
-  }
-}
-
-- (void)updateRoutingInfo
-{
-  Framework & frm = GetFramework();
-  if (!frm.IsRoutingActive())
-    return;
-
-  location::FollowingInfo res;
-  frm.GetRouteFollowingInfo(res);
-
-  if (res.IsValid())
-    [self.controlsManager setupRoutingDashboard:res];
-  
-  [self.controlsManager playTurnNotifications];
-}
-
-- (void)onCompassUpdate:(location::CompassInfo const &)info
-{
-  // TODO: Remove this hack for orientation changing bug
-  if (self.navigationController.visibleViewController == self)
-    GetFramework().OnCompassUpdate(info);
-}
-
-- (void)onLocationStateModeChanged:(location::State::Mode)newMode
-{
-  switch (newMode)
-  {
-    case location::State::UnknownPosition:
-    {
-      self.disableStandbyOnLocationStateMode = NO;
-      [[MapsAppDelegate theApp].m_locationManager stop:self];
-      break;
-    }
-    case location::State::PendingPosition:
-      self.disableStandbyOnLocationStateMode = NO;
-      [[MapsAppDelegate theApp].m_locationManager start:self];
-      break;
-    case location::State::NotFollow:
-      self.disableStandbyOnLocationStateMode = NO;
-      break;
-    case location::State::Follow:
-    case location::State::RotateAndFollow:
-      self.disableStandbyOnLocationStateMode = YES;
-      break;
-  }
-}
-
-#pragma mark - Restore route
-
-- (void)restoreRoute
-{
-  self.forceRoutingStateChange = ForceRoutingStateChangeStartFollowing;
-  auto & f = GetFramework();
-  m2::PointD const location = ToMercator([MapsAppDelegate theApp].m_locationManager.lastLocation.coordinate);
-  f.SetRouter(f.GetBestRouter(location, self.restoreRouteDestination));
-  GetFramework().BuildRoute(location, self.restoreRouteDestination, 0 /* timeoutSec */);
-}
-
++ (MapViewController *)controller { return [MapsAppDelegate theApp].mapViewController; }
 #pragma mark - Map Navigation
 
-- (void)dismissPlacePage
+- (void)dismissPlacePage { [self.controlsManager dismissPlacePage]; }
+- (void)onMapObjectDeselected:(bool)switchFullScreenMode
 {
-  [self.controlsManager dismissPlacePage];
+  [self dismissPlacePage];
+
+  if (!switchFullScreenMode)
+    return;
+
+  if ([MapsAppDelegate theApp].hasApiURL)
+    return;
+
+  BOOL const isSearchHidden = ([MWMSearchManager manager].state == MWMSearchManagerStateHidden);
+  BOOL const isNavigationDashboardHidden =
+      ([MWMNavigationDashboardManager manager].state == MWMNavigationDashboardStateHidden);
+  if (isSearchHidden && isNavigationDashboardHidden)
+    self.controlsManager.hidden = !self.controlsManager.hidden;
 }
 
-- (void)onUserMarkClicked:(unique_ptr<UserMarkCopy>)mark
+- (void)onMapObjectSelected:(place_page::Info const &)info
 {
-  [self.controlsManager showPlacePageWithUserMark:std::move(mark)];
+  self.controlsManager.hidden = NO;
+  [self.controlsManager showPlacePage:info];
 }
 
-- (void)processMapClickAtPoint:(CGPoint)point longClick:(BOOL)isLongClick
+- (void)checkMaskedPointer:(UITouch *)touch withEvent:(df::TouchEvent &)e
 {
-  CGFloat const scaleFactor = self.view.contentScaleFactor;
-  m2::PointD const pxClicked(point.x * scaleFactor, point.y * scaleFactor);
+  int64_t id = reinterpret_cast<int64_t>(touch);
+  int8_t pointerIndex = df::TouchEvent::INVALID_MASKED_POINTER;
+  if (e.GetFirstTouch().m_id == id)
+    pointerIndex = 0;
+  else if (e.GetSecondTouch().m_id == id)
+    pointerIndex = 1;
 
-  Framework & f = GetFramework();
-  UserMark const * userMark = f.GetUserMark(pxClicked, isLongClick);
-  if (f.HasActiveUserMark() == false && self.controlsManager.searchHidden && !f.IsRouteNavigable())
-  {
-    if (userMark == nullptr)
-      self.controlsManager.hidden = !self.controlsManager.hidden;
-    else
-      self.controlsManager.hidden = NO;
-  }
-  f.GetBalloonManager().OnShowMark(userMark);
+  if (e.GetFirstMaskedPointer() == df::TouchEvent::INVALID_MASKED_POINTER)
+    e.SetFirstMaskedPointer(pointerIndex);
+  else
+    e.SetSecondMaskedPointer(pointerIndex);
 }
 
-- (void)onSingleTap:(NSValueWrapper *)point
+- (void)sendTouchType:(df::TouchEvent::ETouchType)type
+          withTouches:(NSSet *)touches
+             andEvent:(UIEvent *)event
 {
-  [self processMapClickAtPoint:[[point getInnerValue] CGPointValue] longClick:NO];
-}
-
-- (void)onLongTap:(NSValueWrapper *)point
-{
-  [self processMapClickAtPoint:[[point getInnerValue] CGPointValue] longClick:YES];
-}
-
-- (void)popoverControllerDidDismissPopover:(UIPopoverController *)popoverController
-{
-  [self destroyPopover];
-  [self invalidate];
-}
-
-- (void)updatePointsFromEvent:(UIEvent *)event
-{
-  NSSet * allTouches = [event allTouches];
+  NSArray * allTouches = [[event allTouches] allObjects];
+  if ([allTouches count] < 1)
+    return;
 
   UIView * v = self.view;
   CGFloat const scaleFactor = v.contentScaleFactor;
 
-  // 0 touches are possible from touchesCancelled.
-  switch ([allTouches count])
+  df::TouchEvent e;
+  UITouch * touch = [allTouches objectAtIndex:0];
+  CGPoint const pt = [touch locationInView:v];
+
+  e.SetTouchType(type);
+
+  df::Touch t0;
+  t0.m_location = m2::PointD(pt.x * scaleFactor, pt.y * scaleFactor);
+  t0.m_id = reinterpret_cast<int64_t>(touch);
+  if ([self hasForceTouch])
+    t0.m_force = touch.force / touch.maximumPossibleForce;
+  e.SetFirstTouch(t0);
+
+  if (allTouches.count > 1)
   {
-    case 0:
-      break;
-    case 1:
-    {
-      CGPoint const pt = [[[allTouches allObjects] objectAtIndex:0] locationInView:v];
-      m_Pt1 = m2::PointD(pt.x * scaleFactor, pt.y * scaleFactor);
-      break;
-    }
-    default:
-    {
-      NSArray * sortedTouches = [[allTouches allObjects] sortedArrayUsingFunction:compareAddress context:NULL];
-      CGPoint const pt1 = [[sortedTouches objectAtIndex:0] locationInView:v];
-      CGPoint const pt2 = [[sortedTouches objectAtIndex:1] locationInView:v];
+    UITouch * touch = [allTouches objectAtIndex:1];
+    CGPoint const pt = [touch locationInView:v];
 
-      m_Pt1 = m2::PointD(pt1.x * scaleFactor, pt1.y * scaleFactor);
-      m_Pt2 = m2::PointD(pt2.x * scaleFactor, pt2.y * scaleFactor);
-      break;
-    }
+    df::Touch t1;
+    t1.m_location = m2::PointD(pt.x * scaleFactor, pt.y * scaleFactor);
+    t1.m_id = reinterpret_cast<int64_t>(touch);
+    if ([self hasForceTouch])
+      t1.m_force = touch.force / touch.maximumPossibleForce;
+    e.SetSecondTouch(t1);
   }
+
+  NSArray * toggledTouches = [touches allObjects];
+  if (toggledTouches.count > 0)
+    [self checkMaskedPointer:[toggledTouches objectAtIndex:0] withEvent:e];
+
+  if (toggledTouches.count > 1)
+    [self checkMaskedPointer:[toggledTouches objectAtIndex:1] withEvent:e];
+
+  Framework & f = GetFramework();
+  f.TouchEvent(e);
 }
 
--(void)preformLongTapSelector:(NSValue *)object
+- (BOOL)hasForceTouch
 {
-  [self performSelector:@selector(onLongTap:) withObject:[[NSValueWrapper alloc] initWithValue:object] afterDelay:1.0];
-}
-
--(void)performSingleTapSelector:(NSValue *)object
-{
-  [self performSelector:@selector(onSingleTap:) withObject:[[NSValueWrapper alloc] initWithValue:object] afterDelay:0.3];
-}
-
--(void)cancelLongTap
-{
-  [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(onLongTap:) object:[[NSValueWrapper alloc] initWithValue:nil]];
-}
-
--(void)cancelSingleTap
-{
-  [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(onSingleTap:) object:[[NSValueWrapper alloc] initWithValue:nil]];
+  return self.view.traitCollection.forceTouchCapability == UIForceTouchCapabilityAvailable;
 }
 
 - (void)touchesBegan:(NSSet *)touches withEvent:(UIEvent *)event
 {
-  // To cancel single tap timer
-  UITouch * theTouch = (UITouch *)[touches anyObject];
-  if (theTouch.tapCount > 1)
-    [self cancelSingleTap];
-
-  [self updatePointsFromEvent:event];
-
-  Framework & f = GetFramework();
-
-  if ([event allTouches].count == 1)
-  {
-    if (f.GetGuiController()->OnTapStarted(m_Pt1))
-      return;
-    self.userTouchesAction = UserTouchesActionDrag;
-
-    // Start long-tap timer
-    [self preformLongTapSelector:[NSValue valueWithCGPoint:[theTouch locationInView:self.view]]];
-    // Temporary solution to filter long touch
-    m_touchDownPoint = m_Pt1;
-  }
-  else
-  {
-    self.userTouchesAction = UserTouchesActionScale;
-  }
-
-  m_isSticking = true;
+  [self sendTouchType:df::TouchEvent::TOUCH_DOWN withTouches:touches andEvent:event];
 }
 
 - (void)touchesMoved:(NSSet *)touches withEvent:(UIEvent *)event
 {
-  m2::PointD const TempPt1 = m_Pt1;
-  m2::PointD const TempPt2 = m_Pt2;
-
-  [self updatePointsFromEvent:event];
-
-  // Cancel long-touch timer
-  if (!m_touchDownPoint.EqualDxDy(m_Pt1, 9))
-    [self cancelLongTap];
-
-  Framework & f = GetFramework();
-
-  if (f.GetGuiController()->OnTapMoved(m_Pt1))
-    return;
-
-  if (m_isSticking)
-  {
-    if ((TempPt1.Length(m_Pt1) > m_StickyThreshold) || (TempPt2.Length(m_Pt2) > m_StickyThreshold))
-    {
-      m_isSticking = false;
-    }
-    else
-    {
-      // Still stickying. Restoring old points and return.
-      m_Pt1 = TempPt1;
-      m_Pt2 = TempPt2;
-      return;
-    }
-  }
-
-  NSUInteger const touchesCount = [event allTouches].count;
-  switch (self.userTouchesAction)
-  {
-    case UserTouchesActionNone:
-      if (touchesCount == 1)
-        self.userTouchesAction = UserTouchesActionDrag;
-      else
-        self.userTouchesAction = UserTouchesActionScale;
-      break;
-    case UserTouchesActionDrag:
-      if (touchesCount == 1)
-        f.DoDrag(DragEvent(m_Pt1.x, m_Pt1.y));
-      else
-        self.userTouchesAction = UserTouchesActionNone;
-      break;
-    case UserTouchesActionScale:
-      if (touchesCount == 2)
-        f.DoScale(ScaleEvent(m_Pt1.x, m_Pt1.y, m_Pt2.x, m_Pt2.y));
-      else
-        self.userTouchesAction = UserTouchesActionNone;
-      break;
-  }
+  [self sendTouchType:df::TouchEvent::TOUCH_MOVE withTouches:nil andEvent:event];
 }
 
 - (void)touchesEnded:(NSSet *)touches withEvent:(UIEvent *)event
 {
-  [self updatePointsFromEvent:event];
-  self.userTouchesAction = UserTouchesActionNone;
-
-  UITouch * theTouch = (UITouch *)[touches anyObject];
-  NSUInteger const tapCount = theTouch.tapCount;
-  NSUInteger const touchesCount = [event allTouches].count;
-
-  Framework & f = GetFramework();
-
-  if (touchesCount == 1)
-  {
-    // Cancel long-touch timer
-    [self cancelLongTap];
-
-    // TapCount could be zero if it was a single long (or moving) tap.
-    if (tapCount < 2)
-    {
-      if (f.GetGuiController()->OnTapEnded(m_Pt1))
-        return;
-    }
-
-    if (tapCount == 1)
-    {
-      // Launch single tap timer
-      if (m_isSticking)
-        [self performSingleTapSelector: [NSValue valueWithCGPoint:[theTouch locationInView:self.view]]];
-    }
-    else if (tapCount == 2 && m_isSticking)
-    {
-      f.ScaleToPoint(ScaleToPointEvent(m_Pt1.x, m_Pt1.y, 2.0));
-    }
-  }
-
-  if (touchesCount == 2 && tapCount == 1 && m_isSticking)
-  {
-    f.Scale(0.5);
-    if (!m_touchDownPoint.EqualDxDy(m_Pt1, 9))
-    {
-      [self cancelLongTap];
-      [self cancelSingleTap];
-    }
-    m_isSticking = NO;
-  }
+  [self sendTouchType:df::TouchEvent::TOUCH_UP withTouches:touches andEvent:event];
 }
 
 - (void)touchesCancelled:(NSSet *)touches withEvent:(UIEvent *)event
 {
-  [self cancelLongTap];
-  [self cancelSingleTap];
-
-  [self updatePointsFromEvent:event];
-  self.userTouchesAction = UserTouchesActionNone;
+  [self sendTouchType:df::TouchEvent::TOUCH_CANCEL withTouches:touches andEvent:event];
 }
 
 #pragma mark - ViewController lifecycle
 
-- (void)dealloc
-{
-  [self destroyPopover];
-  [[NSNotificationCenter defaultCenter] removeObserver:self];
-}
-
-- (BOOL)shouldAutorotateToInterfaceOrientation: (UIInterfaceOrientation)interfaceOrientation
-{
-  return YES; // We support all orientations
-}
-
-- (void)willRotateToInterfaceOrientation:(UIInterfaceOrientation)toInterfaceOrientation
-                                duration:(NSTimeInterval)duration
-{
-  if (isIOSVersionLessThan(8))
-    [(UIViewController *)self.childViewControllers.firstObject
-        willRotateToInterfaceOrientation:toInterfaceOrientation
-                                duration:duration];
-  [self.controlsManager willRotateToInterfaceOrientation:toInterfaceOrientation duration:duration];
-}
-
 - (void)viewWillTransitionToSize:(CGSize)size
        withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator
 {
+  [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
+  [self.alertController viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
   [self.controlsManager viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
-}
-
-- (void)didRotateFromInterfaceOrientation:(UIInterfaceOrientation)fromInterfaceOrientation
-{
-  [self showPopover];
-  [self invalidate];
+  [self.welcomePageController viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
 }
 
 - (void)didReceiveMemoryWarning
@@ -466,227 +232,314 @@ typedef NS_ENUM(NSUInteger, UserTouchesAction)
   [super didReceiveMemoryWarning];
 }
 
-- (void)onTerminate
-{
-  GetFramework().SaveState();
-}
-
-- (void)onEnterBackground
-{
-  // Save state and notify about entering background.
-
-  Framework & f = GetFramework();
-  f.SaveState();
-  f.SetUpdatesEnabled(false);
-  f.EnterBackground();
-}
-
-- (void)setMapStyle:(MapStyle)mapStyle
-{
-  EAGLView * v = (EAGLView *)self.view;
-  [v setMapStyle: mapStyle];
-}
-
-- (void)onEnterForeground
-{
-  // Notify about entering foreground (should be called on the first launch too).
-  GetFramework().EnterForeground();
-
-  if (self.isViewLoaded && self.view.window)
-    [self invalidate]; // only invalidate when map is displayed on the screen
-}
-
+- (void)onTerminate { [(EAGLView *)self.view deallocateNative]; }
+- (void)onGetFocus:(BOOL)isOnFocus { [(EAGLView *)self.view setPresentAvailable:isOnFocus]; }
 - (void)viewWillAppear:(BOOL)animated
 {
   [super viewWillAppear:animated];
-  [[NSNotificationCenter defaultCenter] removeObserver:self name:UIDeviceOrientationDidChangeNotification object:nil];
-  [self invalidate];
 
-  self.controlsManager.menuState = self.menuRestoreState;
+  if ([MWMNavigationDashboardManager manager].state == MWMNavigationDashboardStateHidden)
+    self.controlsManager.menuState = self.controlsManager.menuRestoreState;
+
+  [self updateStatusBarStyle];
+  GetFramework().InvalidateRendering();
+  [self.welcomePageController show];
+  [self showViralAlertIfNeeded];
+  [self checkAuthorization];
 }
 
 - (void)viewDidLoad
 {
   [super viewDidLoad];
-  EAGLView * v = (EAGLView *)self.view;
-  [v initRenderPolicy];
   self.view.clipsToBounds = YES;
-  self.controlsManager = [[MWMMapViewControlsManager alloc] initWithParentController:self];
+  [self processMyPositionStateModeEvent:MWMMyPositionModePendingPosition];
+  [MWMKeyboard addObserver:self];
+  self.welcomePageController = [MWMWelcomePageController controllerWithParent:self];
 }
 
-- (void)viewDidAppear:(BOOL)animated
+- (void)mwm_refreshUI
 {
-  [super viewDidAppear:animated];
-  self.menuRestoreState = self.controlsManager.menuState;
+  [MapsAppDelegate customizeAppearance];
+  [self.navigationController.navigationBar mwm_refreshUI];
+  [self.controlsManager mwm_refreshUI];
+  [self.downloadDialog mwm_refreshUI];
+}
+
+- (void)closePageController:(MWMWelcomePageController *)pageController
+{
+  if ([pageController isEqual:self.welcomePageController])
+    self.welcomePageController = nil;
+
+  auto const todo = GetFramework().ToDoAfterUpdate();
+  
+  switch (todo)
+  {
+  case Framework::DoAfterUpdate::Nothing:
+    break;
+    
+  case Framework::DoAfterUpdate::Migrate:
+    [self openMigration];
+    break;
+
+  case Framework::DoAfterUpdate::AutoupdateMaps:
+  case Framework::DoAfterUpdate::AskForUpdateMaps:
+    [self presentViewController:[MWMAutoupdateController instanceWithPurpose:todo] animated:YES completion:nil];
+    break;
+  }
+}
+
+- (void)showViralAlertIfNeeded
+{
+  NSUserDefaults * ud = NSUserDefaults.standardUserDefaults;
+
+  using namespace osm_auth_ios;
+  if (!AuthorizationIsNeedCheck() || [ud objectForKey:kUDViralAlertWasShown] ||
+      !AuthorizationHaveCredentials())
+    return;
+
+  if (osm::Editor::Instance().GetStats().m_edits.size() < 2)
+    return;
+
+  if (!Platform::IsConnected())
+    return;
+
+  [self.alertController presentEditorViralAlert];
+
+  [ud setObject:[NSDate date] forKey:kUDViralAlertWasShown];
+  [ud synchronize];
 }
 
 - (void)viewWillDisappear:(BOOL)animated
 {
   [super viewWillDisappear:animated];
-
-  GetFramework().SetUpdatesEnabled(false);
-  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(orientationChanged:) name:UIDeviceOrientationDidChangeNotification object:nil];
+  self.controlsManager.menuRestoreState = self.controlsManager.menuState;
 }
 
-- (void)orientationChanged:(NSNotification *)notification
-{
-  [self willRotateToInterfaceOrientation:self.interfaceOrientation duration:0.];
-}
-
-- (BOOL)prefersStatusBarHidden
-{
-  return self.apiBar.isVisible;
-}
-
+- (BOOL)prefersStatusBarHidden { return NO; }
 - (UIStatusBarStyle)preferredStatusBarStyle
 {
-  BOOL const isLight = !self.controlsManager.searchHidden ||
-                       self.controlsManager.menuState == MWMSideMenuStateActive ||
-                       self.controlsManager.isDirectionViewShown ||
-                       (GetFramework().GetMapStyle() == MapStyleDark &&
-                        self.controlsManager.navigationState == MWMNavigationDashboardStateHidden);
-  if (isLight)
-    return UIStatusBarStyleLightContent;
-  return UIStatusBarStyleDefault;
+  return [self.controlsManager preferredStatusBarStyle];
 }
 
-- (void)updateStatusBarStyle
-{
-  [self setNeedsStatusBarAppearanceUpdate];
-}
-
+- (void)updateStatusBarStyle { [self setNeedsStatusBarAppearanceUpdate]; }
 - (id)initWithCoder:(NSCoder *)coder
 {
   NSLog(@"MapViewController initWithCoder Started");
-
-  if ((self = [super initWithCoder:coder]))
-  {
-    Framework & f = GetFramework();
-
-    typedef void (*UserMarkActivatedFnT)(id, SEL, unique_ptr<UserMarkCopy>);
-    typedef void (*PlacePageDismissedFnT)(id, SEL);
-
-    PinClickManager & manager = f.GetBalloonManager();
-
-    SEL userMarkSelector = @selector(onUserMarkClicked:);
-    UserMarkActivatedFnT userMarkFn = (UserMarkActivatedFnT)[self methodForSelector:userMarkSelector];
-    manager.ConnectUserMarkListener(bind(userMarkFn, self, userMarkSelector, _1));
-
-    SEL dismissSelector = @selector(dismissPlacePage);
-    PlacePageDismissedFnT dismissFn = (PlacePageDismissedFnT)[self methodForSelector:dismissSelector];
-    manager.ConnectDismissListener(bind(dismissFn, self, dismissSelector));
-
-    typedef void (*LocationStateModeFnT)(id, SEL, location::State::Mode);
-    SEL locationStateModeSelector = @selector(onLocationStateModeChanged:);
-    LocationStateModeFnT locationStateModeFn = (LocationStateModeFnT)[self methodForSelector:locationStateModeSelector];
-
-    f.GetLocationState()->AddStateModeListener(bind(locationStateModeFn, self, locationStateModeSelector, _1));
-
-    m_predictor = [[LocationPredictor alloc] initWithObserver:self];
-
-    m_StickyThreshold = 10;
-
-    self.forceRoutingStateChange = ForceRoutingStateChangeNone;
-    self.userTouchesAction = UserTouchesActionNone;
-    self.menuRestoreState = MWMSideMenuStateInactive;
-
-    // restore previous screen position
-    if (!f.LoadState())
-      f.SetMaxWorldRect();
-
-    f.Invalidate();
-    f.LoadBookmarks();
-
-    f.GetCountryStatusDisplay()->SetDownloadCountryListener([self, &f](storage::TIndex const & idx, int opt)
-    {
-      ActiveMapsLayout & layout = f.GetCountryTree().GetActiveMapLayout();
-      if (opt == -1)
-      {
-        layout.RetryDownloading(idx);
-      }
-      else
-      {
-        LocalAndRemoteSizeT sizes = layout.GetRemoteCountrySizes(idx);
-        uint64_t sizeToDownload = sizes.first;
-        MapOptions options = static_cast<MapOptions>(opt);
-        if(HasOptions(options, MapOptions::CarRouting))
-          sizeToDownload += sizes.second;
-
-        NSString * name = @(layout.GetCountryName(idx).c_str());
-        Platform::EConnectionType const connection = Platform::ConnectionStatus();
-        if (connection != Platform::EConnectionType::CONNECTION_NONE)
-        {
-          if (connection == Platform::EConnectionType::CONNECTION_WWAN && sizeToDownload > 50 * MB)
-          {
-            [self.alertController presentnoWiFiAlertWithName:name downloadBlock:^
-            {
-              layout.DownloadMap(idx, static_cast<MapOptions>(opt));
-            }];
-            return;
-          }
-        }
-        else
-        {
-          [self.alertController presentNoConnectionAlert];
-          return;
-        }
-
-        layout.DownloadMap(idx, static_cast<MapOptions>(opt));
-      }
-    });
-
-    f.SetRouteBuildingListener([self, &f](routing::IRouter::ResultCode code, vector<storage::TIndex> const & absentCountries, vector<storage::TIndex> const & absentRoutes)
-    {
-      switch (code)
-      {
-        case routing::IRouter::ResultCode::NoError:
-        {
-          f.GetBalloonManager().RemovePin();
-          f.GetBalloonManager().Dismiss();
-          self.controlsManager.routeBuildingProgress = 100.;
-          self.controlsManager.searchHidden = YES;
-          if (self.forceRoutingStateChange == ForceRoutingStateChangeStartFollowing)
-            [self.controlsManager routingNavigation];
-          else
-            [self.controlsManager routingReady];
-          [self updateRoutingInfo];
-          self.forceRoutingStateChange = ForceRoutingStateChangeNone;
-          bool isDisclaimerApproved = false;
-          (void)Settings::Get("IsDisclaimerApproved", isDisclaimerApproved);
-          if (!isDisclaimerApproved)
-          {
-            [self presentRoutingDisclaimerAlert];
-            Settings::Set("IsDisclaimerApproved", true);
-          }
-          break;
-        }
-        case routing::IRouter::RouteFileNotExist:
-        case routing::IRouter::InconsistentMWMandRoute:
-        case routing::IRouter::NeedMoreMaps:
-        case routing::IRouter::FileTooOld:
-        case routing::IRouter::RouteNotFound:
-          [self.controlsManager handleRoutingError];
-          [self presentDownloaderAlert:code countries:absentCountries routes:absentRoutes];
-          self.forceRoutingStateChange = ForceRoutingStateChangeNone;
-          break;
-        case routing::IRouter::Cancelled:
-          self.forceRoutingStateChange = ForceRoutingStateChangeNone;
-          break;
-        default:
-          [self.controlsManager handleRoutingError];
-          [self presentDefaultAlert:code];
-          self.forceRoutingStateChange = ForceRoutingStateChangeNone;
-          break;
-      }
-    });
-    f.SetRouteProgressListener([self](float progress)
-    {
-      self.controlsManager.routeBuildingProgress = progress;
-    });
-  }
+  self = [super initWithCoder:coder];
+  if (self)
+    [self initialize];
 
   NSLog(@"MapViewController initWithCoder Ended");
   return self;
+}
+
+- (void)initialize
+{
+  Framework & f = GetFramework();
+  // TODO: Review and improve this code.
+  f.SetMapSelectionListeners(
+      [self](place_page::Info const & info) { [self onMapObjectSelected:info]; },
+      [self](bool switchFullScreen) { [self onMapObjectDeselected:switchFullScreen]; });
+  // TODO: Review and improve this code.
+  f.SetMyPositionModeListener([self](location::EMyPositionMode mode, bool routingActive) {
+    // TODO: Two global listeners are subscribed to the same event from the core.
+    // Probably it's better to subscribe only wnen needed and usubscribe in other cases.
+    // May be better solution would be multiobservers support in the C++ core.
+    [self processMyPositionStateModeEvent:location_helpers::mwmMyPositionMode(mode)];
+  });
+
+  self.userTouchesAction = UserTouchesActionNone;
+  [MWMBookmarksManager loadBookmarks];
+  [MWMFrameworkListener addObserver:self];
+}
+
+#pragma mark - Open controllers
+
+- (void)openMigration { [self performSegueWithIdentifier:kMigrationSegue sender:self]; }
+- (void)openBookmarks
+{
+  [self.navigationController pushViewController:[[MWMBookmarksTabViewController alloc] init]
+                                       animated:YES];
+}
+
+- (void)openMapsDownloader:(MWMMapDownloaderMode)mode
+{
+  [Alohalytics logEvent:kAlohalyticsTapEventKey withValue:@"downloader"];
+  [self performSegueWithIdentifier:kDownloaderSegue sender:@(mode)];
+}
+
+- (void)openEditor
+{
+  using namespace osm_auth_ios;
+
+  auto const & featureID = [self.controlsManager.featureHolder featureId];
+
+  [Statistics logEvent:kStatEditorEditStart
+        withParameters:@{
+          kStatIsAuthenticated: @(AuthorizationHaveCredentials()),
+          kStatIsOnline: Platform::IsConnected() ? kStatYes : kStatNo,
+          kStatEditorMWMName: @(featureID.GetMwmName().c_str()),
+          kStatEditorMWMVersion: @(featureID.GetMwmVersion())
+        }];
+  [self performSegueWithIdentifier:kEditorSegue sender:self.controlsManager.featureHolder];
+}
+
+- (void)openHotelFacilities
+{
+  [self performSegueWithIdentifier:kHotelFacilitiesSegue sender:self.controlsManager.bookingInfoHolder];
+}
+
+- (void)openBookmarkEditorWithData:(MWMPlacePageData *)data
+{
+  [self performSegueWithIdentifier:kPP2BookmarkEditingSegue sender:data];
+}
+
+- (void)showUGCAuth
+{
+  [Statistics logEvent:kStatUGCReviewAuthShown];
+  if (IPAD)
+  {
+    auto controller = [[MWMAuthorizationViewController alloc]
+                       initWithPopoverSourceView:self.controlsManager.anchorView
+                       sourceComponent:MWMAuthorizationSourceUGC
+                       permittedArrowDirections:UIPopoverArrowDirectionDown
+                       successHandler:nil
+                       errorHandler:nil
+                       completionHandler:nil];
+
+    [self presentViewController:controller animated:YES completion:nil];
+    return;
+  }
+
+  auto controller = [[MWMAuthorizationViewController alloc]
+                     initWithBarButtonItem:nil
+                           sourceComponent:MWMAuthorizationSourceUGC
+                            successHandler:nil
+                              errorHandler:nil
+                         completionHandler:nil];
+
+  [self presentViewController:controller animated:YES completion:nil];
+}
+
+- (void)processMyPositionStateModeEvent:(MWMMyPositionMode)mode
+{
+  [MWMLocationManager setMyPositionMode:mode];
+  [[MWMSideButtons buttons] processMyPositionStateModeEvent:mode];
+  self.disableStandbyOnLocationStateMode = NO;
+  switch (mode)
+  {
+  case location::NotFollowNoPosition:
+  {
+    BOOL const hasLocation = [MWMLocationManager lastLocation] != nil;
+    if (hasLocation)
+    {
+      GetFramework().SwitchMyPositionNextMode();
+      break;
+    }
+    if ([Alohalytics isFirstSession])
+      break;
+    if (gIsFirstMyPositionMode)
+    {
+      GetFramework().SwitchMyPositionNextMode();
+      break;
+    }
+    BOOL const isMapVisible = (self.navigationController.visibleViewController == self);
+    if (isMapVisible && ![MWMLocationManager isLocationProhibited])
+    {
+      [self.alertController presentLocationNotFoundAlertWithOkBlock:^{
+        GetFramework().SwitchMyPositionNextMode();
+      }];
+    }
+    break;
+  }
+  case location::PendingPosition:
+  case location::NotFollow: break;
+  case location::Follow:
+  case location::FollowAndRotate: self.disableStandbyOnLocationStateMode = YES; break;
+  }
+  gIsFirstMyPositionMode = NO;
+}
+
+#pragma mark - MWMFrameworkDrapeObserver
+
+- (void)processViewportCountryEvent:(TCountryId const &)countryId
+{
+  [self.downloadDialog processViewportCountryEvent:countryId];
+}
+
+#pragma mark - MWMFrameworkStorageObserver
+
+- (void)processCountryEvent:(TCountryId const &)countryId
+{
+  if (countryId.empty())
+  {
+#ifdef OMIM_PRODUCTION
+    auto err = [[NSError alloc] initWithDomain:kMapsmeErrorDomain code:1
+                      userInfo:@{@"Description" : @"attempt to get info from empty countryId"}];
+    [[Crashlytics sharedInstance] recordError:err];
+#endif
+    return;
+  }
+
+  NodeStatuses nodeStatuses{};
+  GetFramework().GetStorage().GetNodeStatuses(countryId, nodeStatuses);
+  if (nodeStatuses.m_status != NodeStatus::Error)
+    return;
+  switch (nodeStatuses.m_error)
+  {
+  case NodeErrorCode::NoError: break;
+  case NodeErrorCode::UnknownError:
+    [Statistics logEvent:kStatDownloaderMapError withParameters:@{kStatType : kStatUnknownError}];
+    break;
+  case NodeErrorCode::OutOfMemFailed:
+    [Statistics logEvent:kStatDownloaderMapError withParameters:@{kStatType : kStatNoSpace}];
+    break;
+  case NodeErrorCode::NoInetConnection:
+    [Statistics logEvent:kStatDownloaderMapError withParameters:@{kStatType : kStatNoConnection}];
+    break;
+  }
+}
+
+#pragma mark - Authorization
+
+- (void)checkAuthorization
+{
+  using namespace osm_auth_ios;
+  BOOL const isAfterEditing = AuthorizationIsNeedCheck() && !AuthorizationHaveCredentials();
+  if (isAfterEditing)
+  {
+    AuthorizationSetNeedCheck(NO);
+    if (!Platform::IsConnected())
+      return;
+    [Statistics logEvent:kStatEventName(kStatPlacePage, kStatEditTime)
+          withParameters:@{kStatValue : kStatAuthorization}];
+    [self.alertController presentOsmAuthAlert];
+  }
+}
+
+#pragma mark - 3d touch
+
+- (void)performAction:(NSString *)action
+{
+  [self.navigationController popToRootViewControllerAnimated:NO];
+  if (self.isViewLoaded)
+  {
+    auto searchState = MWMSearchManagerStateHidden;
+    [MWMRouter stopRouting];
+    if ([action isEqualToString:@"me.maps.3daction.bookmarks"])
+      [self openBookmarks];
+    else if ([action isEqualToString:@"me.maps.3daction.search"])
+      searchState = MWMSearchManagerStateDefault;
+    else if ([action isEqualToString:@"me.maps.3daction.route"])
+      [self.controlsManager onRoutePrepare];
+    [MWMSearchManager manager].state = searchState;
+  }
+  else
+  {
+    dispatch_async(dispatch_get_main_queue(), ^{
+      [self performAction:action];
+    });
+  }
 }
 
 #pragma mark - API bar
@@ -698,99 +551,9 @@ typedef NS_ENUM(NSUInteger, UserTouchesAction)
   return _apiBar;
 }
 
-- (void)showAPIBar
-{
-  self.apiBar.isVisible = YES;
-}
-
 #pragma mark - ShowDialog callback
 
-- (void)presentDownloaderAlert:(routing::IRouter::ResultCode)code
-                     countries:(vector<storage::TIndex> const &)countries
-                        routes:(vector<storage::TIndex> const &)routes
-{
-  if (countries.size() || routes.size())
-    [self.alertController presentDownloaderAlertWithCountries:countries routes:routes code:code];
-  else
-    [self presentDefaultAlert:code];
-}
-
-- (void)presentDisabledLocationAlert
-{
-  [self.alertController presentDisabledLocationAlert];
-}
-
-- (void)presentDefaultAlert:(routing::IRouter::ResultCode)type
-{
-  [self.alertController presentAlert:type];
-}
-
-- (void)presentRoutingDisclaimerAlert
-{
-  [self.alertController presentRoutingDisclaimerAlert];
-}
-
-#pragma mark - Getters
-
-- (MWMAlertViewController *)alertController
-{
-  if (!_alertController)
-    _alertController = [[MWMAlertViewController alloc] initWithViewController:self];
-  return _alertController;
-}
-
-#pragma mark - Public methods
-
-- (void)setupMeasurementSystem
-{
-  GetFramework().SetupMeasurementSystem();
-}
-
-#pragma mark - Private methods
-
-NSInteger compareAddress(id l, id r, void * context)
-{
-  return l < r;
-}
-
-- (void)invalidate
-{
-  Framework & f = GetFramework();
-  if (!f.SetUpdatesEnabled(true))
-    f.Invalidate();
-}
-
-- (void)destroyPopover
-{
-  self.popoverVC = nil;
-}
-
-- (void)showPopover
-{
-  if (self.popoverVC)
-    GetFramework().GetBalloonManager().Hide();
-
-  double const sf = self.view.contentScaleFactor;
-
-  Framework & f = GetFramework();
-  m2::PointD tmp = m2::PointD(f.GtoP(m2::PointD(m_popoverPos.x, m_popoverPos.y)));
-
-  [self.popoverVC presentPopoverFromRect:CGRectMake(tmp.x / sf, tmp.y / sf, 1, 1) inView:self.view permittedArrowDirections:UIPopoverArrowDirectionAny animated:YES];
-}
-
-- (void)dismissPopover
-{
-  [self.popoverVC dismissPopoverAnimated:YES];
-  [self destroyPopover];
-  [self invalidate];
-}
-
-- (void)setRestoreRouteDestination:(m2::PointD)restoreRouteDestination
-{
-  _restoreRouteDestination = restoreRouteDestination;
-  self.forceRoutingStateChange = ForceRoutingStateChangeRestoreRoute;
-}
-
+- (void)presentDisabledLocationAlert { [self.alertController presentDisabledLocationAlert]; }
 - (void)setDisableStandbyOnLocationStateMode:(BOOL)disableStandbyOnLocationStateMode
 {
   if (_disableStandbyOnLocationStateMode == disableStandbyOnLocationStateMode)
@@ -802,27 +565,83 @@ NSInteger compareAddress(id l, id r, void * context)
     [[MapsAppDelegate theApp] enableStandby];
 }
 
-- (void)setUserTouchesAction:(UserTouchesAction)userTouchesAction
+#pragma mark - Segue
+
+- (void)prepareForSegue:(UIStoryboardSegue *)segue sender:(id)sender
 {
-  if (_userTouchesAction == userTouchesAction)
-    return;
-  Framework & f = GetFramework();
-  switch (userTouchesAction)
+  if ([segue.identifier isEqualToString:kEditorSegue])
   {
-    case UserTouchesActionNone:
-      if (_userTouchesAction == UserTouchesActionDrag)
-        f.StopDrag(DragEvent(m_Pt1.x, m_Pt1.y));
-      else if (_userTouchesAction == UserTouchesActionScale)
-        f.StopScale(ScaleEvent(m_Pt1.x, m_Pt1.y, m_Pt2.x, m_Pt2.y));
-      break;
-    case UserTouchesActionDrag:
-      f.StartDrag(DragEvent(m_Pt1.x, m_Pt1.y));
-      break;
-    case UserTouchesActionScale:
-      f.StartScale(ScaleEvent(m_Pt1.x, m_Pt1.y, m_Pt2.x, m_Pt2.y));
-      break;
+    MWMEditorViewController * dvc = segue.destinationViewController;
+    [dvc setFeatureToEdit:static_cast<id<MWMFeatureHolder>>(sender).featureId];
   }
-  _userTouchesAction = userTouchesAction;
+  else if ([segue.identifier isEqualToString:kPP2BookmarkEditingSegue])
+  {
+    MWMEditBookmarkController * dvc = segue.destinationViewController;
+    dvc.data = static_cast<MWMPlacePageData *>(sender);
+  }
+  else if ([segue.identifier isEqualToString:kDownloaderSegue])
+  {
+    MWMMapDownloaderViewController * dvc = segue.destinationViewController;
+    NSNumber * mode = sender;
+    [dvc setParentCountryId:@(GetFramework().GetStorage().GetRootId().c_str())
+                       mode:static_cast<MWMMapDownloaderMode>(mode.integerValue)];
+  }
+  else if ([segue.identifier isEqualToString:kMap2FBLoginSegue])
+  {
+    MWMAuthorizationWebViewLoginViewController * dvc = segue.destinationViewController;
+    dvc.authType = MWMWebViewAuthorizationTypeFacebook;
+  }
+  else if ([segue.identifier isEqualToString:kMap2GoogleLoginSegue])
+  {
+    MWMAuthorizationWebViewLoginViewController * dvc = segue.destinationViewController;
+    dvc.authType = MWMWebViewAuthorizationTypeGoogle;
+  }
+  else if ([segue.identifier isEqualToString:kHotelFacilitiesSegue])
+  {
+    MWMFacilitiesController * dvc = segue.destinationViewController;
+    auto bookingInfo = id<MWMBookingInfoHolder>(sender);
+    dvc.facilities = bookingInfo.hotelFacilities;
+    dvc.hotelName = bookingInfo.hotelName;
+  }
+}
+
+#pragma mark - MWMKeyboard
+
+- (void)onKeyboardWillAnimate { [self.view setNeedsLayout]; }
+- (void)onKeyboardAnimation
+{
+  auto const kbHeight = [MWMKeyboard keyboardHeight];
+  self.sideButtonsAreaKeyboard.constant = kbHeight;
+  if (IPAD)
+  {
+    self.visibleAreaKeyboard.constant = kbHeight;
+    self.placePageAreaKeyboard.constant = kbHeight;
+  }
+  [self.view layoutIfNeeded];
+}
+#pragma mark - Properties
+
+- (MWMMapViewControlsManager *)controlsManager
+{
+  if (!self.isViewLoaded)
+    return nil;
+  if (!_controlsManager)
+    _controlsManager = [[MWMMapViewControlsManager alloc] initWithParentController:self];
+  return _controlsManager;
+}
+
+- (BOOL)hasNavigationBar { return NO; }
+- (MWMMapDownloadDialog *)downloadDialog
+{
+  if (!_downloadDialog)
+    _downloadDialog = [MWMMapDownloadDialog dialogForController:self];
+  return _downloadDialog;
+}
+
+- (void)setPlacePageTopBound:(CGFloat)bound;
+{
+  self.visibleAreaBottom.constant = bound;
+  self.sideButtonsAreaBottom.constant = bound;
 }
 
 @end

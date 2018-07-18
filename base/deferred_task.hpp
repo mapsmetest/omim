@@ -1,61 +1,38 @@
 #pragma once
 
-#include "base/condition.hpp"
-#include "base/macros.hpp"
 #include "base/thread.hpp"
-#include "base/thread_checker.hpp"
 
-#include "std/chrono.hpp"
-#include "std/condition_variable.hpp"
-#include "std/function.hpp"
-#include "std/unique_ptr.hpp"
+#include <chrono>
+#include <condition_variable>
+#include <functional>
+#include <mutex>
 
-
-// This class is used to call a function after waiting for a specified
-// amount of time.  The function is called in a separate thread.  This
-// class is not thread safe.
+namespace my
+{
 class DeferredTask
 {
+  using TDuration = std::chrono::duration<double>;
+  threads::SimpleThread m_thread;
+  std::mutex m_mutex;
+  std::condition_variable m_cv;
+  std::function<void()> m_fn;
+  TDuration m_duration;
+  bool m_terminate = false;
+
 public:
-  typedef function<void()> TTask;
-
-  DeferredTask(TTask const & task, milliseconds ms);
-
+  DeferredTask(TDuration const & duration);
   ~DeferredTask();
 
-  /// Returns true if task was started after delay.
-  bool WasStarted() const;
+  void Drop();
 
-  /// Cancels task without waiting for worker thread termination.
-  void Cancel();
-
-  /// Waits for task's completion and worker thread termination.
-  void WaitForCompletion();
-
-private:
-  class Routine : public threads::IRoutine
+  template <typename TFn>
+  void RestartWith(TFn const && fn)
   {
-    TTask const m_task;
-    milliseconds const m_delay;
-    condition_variable m_cv;
-    atomic<bool> & m_started;
-
-  public:
-    Routine(TTask const & task, milliseconds delay, atomic<bool> & started);
-
-    // IRoutine overrides:
-    void Do() override;
-
-    // my::Cancellable overrides:
-    void Cancel() override;
-  };
-
-  /// The construction and destruction order is strict here: m_started
-  /// is used by routine that will be executed on m_thread.
-  atomic<bool> m_started;
-  threads::Thread m_thread;
-
-  DECLARE_THREAD_CHECKER(m_threadChecker);
-
-  DISALLOW_COPY_AND_MOVE(DeferredTask);
+    {
+      std::unique_lock<std::mutex> l(m_mutex);
+      m_fn = fn;
+    }
+    m_cv.notify_one();
+  }
 };
+}  // namespace my

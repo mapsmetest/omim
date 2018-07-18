@@ -1,105 +1,142 @@
 package com.mapswithme.maps.widget.placepage;
 
+import android.animation.TimeInterpolator;
+import android.animation.ValueAnimator;
 import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.support.v4.view.GestureDetectorCompat;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewGroup;
-import android.widget.ScrollView;
+import android.view.animation.AccelerateInterpolator;
+import android.view.animation.Interpolator;
 
 import com.mapswithme.maps.MwmApplication;
 import com.mapswithme.maps.R;
 import com.mapswithme.maps.bookmarks.data.MapObject;
+import com.mapswithme.maps.widget.ObservableScrollView;
 import com.mapswithme.maps.widget.placepage.PlacePageView.State;
 import com.mapswithme.util.UiUtils;
 
 /**
  * Class is responsible for animations of PP(place page) and PPP(place page preview).
  */
-public abstract class BasePlacePageAnimationController
+public abstract class BasePlacePageAnimationController implements ObservableScrollView.ScrollListener
 {
-  protected static final int DURATION = MwmApplication.get().getResources().getInteger(R.integer.anim_placepage);
+  private static final int DURATION = MwmApplication.get()
+                                                    .getResources()
+                                                    .getInteger(R.integer.anim_placepage);
+  private static final TimeInterpolator INTERPOLATOR = new AccelerateInterpolator();
+  State mState = State.HIDDEN;
 
-  protected State mState = State.HIDDEN;
-
-  protected PlacePageView mPlacePage;
-  protected ViewGroup mPreview;
-  protected ViewGroup mFrame;
-  protected ScrollView mDetails;
-  protected View mDetailsContent;
-  protected ViewGroup mBookmarkDetails;
-  protected ViewGroup mButtons;
+  PlacePageView mPlacePage;
+  ViewGroup mPreview;
+  ViewGroup mDetailsFrame;
+  ObservableScrollView mDetailsScroll;
+  View mDetailsContent;
+  ViewGroup mBookmarkDetails;
+  ViewGroup mButtons;
   // Gestures
-  protected GestureDetectorCompat mGestureDetector;
-  protected boolean mIsGestureHandled;
-  protected float mDownCoord;
-  protected float mTouchSlop;
-  // Visibility
-  protected OnVisibilityChangedListener mVisibilityChangedListener;
+  GestureDetectorCompat mGestureDetector;
+  boolean mIsDragging;
+  float mDownCoord;
+  float mTouchSlop;
+  int mCurrentScrollY;
 
+  private OnVisibilityChangedListener mVisibilityListener;
 
   public interface OnVisibilityChangedListener
   {
+
     void onPreviewVisibilityChanged(boolean isVisible);
+
     void onPlacePageVisibilityChanged(boolean isVisible);
+  }
+
+  @Nullable
+  private OnAnimationListener mProgressListener;
+
+  public interface OnAnimationListener
+  {
+    void onProgress(float translationX, float translationY);
   }
 
   protected abstract void initGestureDetector();
 
-  public BasePlacePageAnimationController(@NonNull PlacePageView placePage)
+  BasePlacePageAnimationController(@NonNull PlacePageView placePage)
   {
     mPlacePage = placePage;
     mPreview = (ViewGroup) placePage.findViewById(R.id.pp__preview);
-    mFrame = (ViewGroup) placePage.findViewById(R.id.pp__details_frame);
-    mDetails = (ScrollView) placePage.findViewById(R.id.pp__details);
-    mDetailsContent = mDetails.getChildAt(0);
-    mBookmarkDetails = (ViewGroup) mFrame.findViewById(R.id.rl__bookmark_details);
+    mDetailsFrame = (ViewGroup) placePage.findViewById(R.id.pp__details_frame);
+    mDetailsScroll = (ObservableScrollView) placePage.findViewById(R.id.pp__details);
+    mDetailsScroll.setScrollListener(this);
+    mDetailsContent = mDetailsScroll.getChildAt(0);
+    mBookmarkDetails = (ViewGroup) mDetailsFrame.findViewById(R.id.bookmark_frame);
     mButtons = (ViewGroup) placePage.findViewById(R.id.pp__buttons);
     initGestureDetector();
 
     mTouchSlop = ViewConfiguration.get(mPlacePage.getContext()).getScaledTouchSlop();
 
     if (mPlacePage.isFloating() || mPlacePage.isDocked())
-      mFrame.setPadding(mFrame.getPaddingLeft(), mFrame.getPaddingTop(), mFrame.getPaddingRight(),
-                        UiUtils.dimen(R.dimen.place_page_buttons_height));
+      mDetailsFrame.setPadding(mDetailsFrame.getPaddingLeft(), mDetailsFrame.getPaddingTop(), mDetailsFrame
+                                   .getPaddingRight(),
+                               UiUtils.dimen(R.dimen.place_page_buttons_height));
 
     if (mPlacePage.isDocked())
     {
-      ViewGroup.LayoutParams lp = mFrame.getLayoutParams();
+      ViewGroup.LayoutParams lp = mDetailsFrame.getLayoutParams();
       lp.height = ViewGroup.LayoutParams.MATCH_PARENT;
-      mFrame.setLayoutParams(lp);
+      mDetailsFrame.setLayoutParams(lp);
     }
+
+    initialVisibility();
   }
 
-  public void setState(State state, MapObject.MapObjectType type)
+  @Override
+  public void onScroll(int left, int top)
   {
-    State newState = state;
-    if (type == MapObject.MapObjectType.BOOKMARK && state == State.DETAILS)
-      newState = State.BOOKMARK;
-
-    if (newState != mState)
-    {
-      onStateChanged(mState, newState);
-      mState = newState;
-    }
+    mCurrentScrollY = top;
   }
 
-  protected void initialHide()
+  @Override
+  public void onScrollEnd()
   {
-    UiUtils.invisible(mPlacePage);
   }
 
-  protected abstract void onStateChanged(State currentState, State newState);
+  protected void initialVisibility()
+  {
+    UiUtils.invisible(mPlacePage, mPreview, mDetailsFrame, mBookmarkDetails);
+  }
 
   public State getState()
   {
     return mState;
   }
 
-  public void setOnVisibilityChangedListener(OnVisibilityChangedListener listener)
+  void setState(final State state, @MapObject.MapObjectType final int type)
   {
-    mVisibilityChangedListener = listener;
+    mPlacePage.post(new Runnable()
+    {
+      @Override
+      public void run()
+      {
+        onStateChanged(mState, state, type);
+        mState = state;
+      }
+    });
+  }
+
+  protected abstract void onStateChanged(State currentState, State newState, int type);
+
+  void setOnVisibilityChangedListener(OnVisibilityChangedListener listener)
+  {
+    mVisibilityListener = listener;
+  }
+
+  void setOnProgressListener(@Nullable OnAnimationListener listener)
+  {
+    mProgressListener = listener;
   }
 
   protected abstract boolean onInterceptTouchEvent(MotionEvent event);
@@ -109,12 +146,32 @@ public abstract class BasePlacePageAnimationController
     return mGestureDetector.onTouchEvent(event);
   }
 
-  protected void notifyVisibilityListener(boolean previewShown, boolean ppShown)
+  void notifyVisibilityListener(boolean previewShown, boolean ppShown)
   {
-    if (mVisibilityChangedListener != null)
+    if (mVisibilityListener != null)
     {
-      mVisibilityChangedListener.onPreviewVisibilityChanged(previewShown);
-      mVisibilityChangedListener.onPlacePageVisibilityChanged(ppShown);
+      mVisibilityListener.onPreviewVisibilityChanged(previewShown);
+      mVisibilityListener.onPlacePageVisibilityChanged(ppShown);
     }
+  }
+
+  void notifyProgress(float translationX, float translationY)
+  {
+    if (mProgressListener == null)
+      return;
+
+    mProgressListener.onProgress(translationX, translationY);
+  }
+
+  void startDefaultAnimator(ValueAnimator animator)
+  {
+    startDefaultAnimator(animator, new AccelerateInterpolator());
+  }
+
+  void startDefaultAnimator(ValueAnimator animator, Interpolator interpolator)
+  {
+    animator.setDuration(DURATION);
+    animator.setInterpolator(interpolator == null ? INTERPOLATOR : interpolator);
+    animator.start();
   }
 }

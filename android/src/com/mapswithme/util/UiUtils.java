@@ -2,33 +2,57 @@ package com.mapswithme.util;
 
 import android.animation.Animator;
 import android.app.Activity;
-import android.content.DialogInterface;
-import android.content.Intent;
+import android.content.ContentResolver;
+import android.content.Context;
 import android.content.res.Configuration;
+import android.content.res.Resources;
+import android.content.res.TypedArray;
+import android.graphics.Color;
+import android.graphics.Rect;
 import android.net.Uri;
 import android.os.Build;
-import android.provider.Settings;
+import android.support.annotation.AnyRes;
+import android.support.annotation.AttrRes;
+import android.support.annotation.ColorRes;
 import android.support.annotation.DimenRes;
 import android.support.annotation.IdRes;
 import android.support.annotation.NonNull;
-import android.support.annotation.Nullable;
+import android.support.annotation.StringRes;
+import android.support.design.widget.TextInputLayout;
+import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AlertDialog;
 import android.support.v7.widget.Toolbar;
 import android.text.TextUtils;
+import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.Surface;
+import android.view.TouchDelegate;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
+import android.view.Window;
+import android.view.WindowManager;
 import android.view.animation.Animation;
 import android.view.animation.Animation.AnimationListener;
-import android.view.animation.AnimationUtils;
+import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.TextView;
+
 import com.mapswithme.maps.MwmApplication;
 import com.mapswithme.maps.R;
 
 public final class UiUtils
 {
+  private static final int DEFAULT_TINT_COLOR = Color.parseColor("#20000000");
+  public static final int NO_ID = -1;
+  public static final String PHRASE_SEPARATOR = " • ";
   private static float sScreenDensity;
 
+  public static void addStatusBarOffset(@NonNull View view)
+  {
+    ViewGroup.MarginLayoutParams params = (ViewGroup.MarginLayoutParams) view.getLayoutParams();
+    params.setMargins(0, UiUtils.getStatusBarHeight(view.getContext()), 0, 0);
+  }
 
   public static class SimpleAnimationListener implements AnimationListener
   {
@@ -60,15 +84,16 @@ public final class UiUtils
     public void onAnimationRepeat(Animator animation) {}
   }
 
-  
-  public static void waitLayout(final View view, @NonNull final ViewTreeObserver.OnGlobalLayoutListener callback)
+  public interface OnViewMeasuredListener
   {
-    view.getViewTreeObserver().addOnGlobalLayoutListener(new ViewTreeObserver.OnGlobalLayoutListener()
-    {
+    void onViewMeasured(int width, int height);
+  }
+
+  public static void waitLayout(final View view, @NonNull final ViewTreeObserver.OnGlobalLayoutListener callback) {
+    view.getViewTreeObserver().addOnGlobalLayoutListener(new ViewTreeObserver.OnGlobalLayoutListener() {
       @SuppressWarnings("deprecation")
       @Override
-      public void onGlobalLayout()
-      {
+      public void onGlobalLayout() {
         // viewTreeObserver can be dead(isAlive() == false), we should get a new one here.
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN)
           view.getViewTreeObserver().removeGlobalOnLayoutListener(this);
@@ -80,12 +105,28 @@ public final class UiUtils
     });
   }
 
-  public static void hide(View view)
+  public static void measureView(final View frame, final OnViewMeasuredListener listener)
+  {
+    waitLayout(frame, new ViewTreeObserver.OnGlobalLayoutListener()
+    {
+      @Override
+      public void onGlobalLayout()
+      {
+        Activity ac = (Activity) frame.getContext();
+        if (ac == null || ac.isFinishing())
+          return;
+
+        listener.onViewMeasured(frame.getMeasuredWidth(), frame.getMeasuredHeight());
+      }
+    });
+  }
+
+  public static void hide(@NonNull View view)
   {
     view.setVisibility(View.GONE);
   }
 
-  public static void hide(View... views)
+  public static void hide(@NonNull View... views)
   {
     for (final View v : views)
       v.setVisibility(View.GONE);
@@ -146,9 +187,49 @@ public final class UiUtils
       invisible(frame, id);
   }
 
+  public static boolean isHidden(View view)
+  {
+    return view.getVisibility() == View.GONE;
+  }
+
+  public static boolean isInvisible(View view)
+  {
+    return view.getVisibility() == View.INVISIBLE;
+  }
+
+  public static boolean isVisible(View view)
+  {
+    return view.getVisibility() == View.VISIBLE;
+  }
+
+  public static void visibleIf(boolean condition, View view)
+  {
+    view.setVisibility(condition ? View.VISIBLE : View.INVISIBLE);
+  }
+
+  public static void visibleIf(boolean condition, View... views)
+  {
+    if (condition)
+      show(views);
+    else
+      invisible(views);
+  }
+
   public static void showIf(boolean condition, View view)
   {
     view.setVisibility(condition ? View.VISIBLE : View.GONE);
+  }
+
+  public static void hideIf(boolean condition, View... views)
+  {
+    if (condition)
+    {
+      hide(views);
+    }
+    else
+    {
+      show(views);
+    }
   }
 
   public static void showIf(boolean condition, View... views)
@@ -157,6 +238,17 @@ public final class UiUtils
       show(views);
     else
       hide(views);
+  }
+
+  public static void showIf(boolean condition, View parent, @IdRes int... viewIds)
+  {
+    for (@IdRes int id : viewIds)
+    {
+      if (condition)
+        show(parent.findViewById(id));
+      else
+        hide(parent.findViewById(id));
+    }
   }
 
   public static void setTextAndShow(TextView tv, CharSequence text)
@@ -171,218 +263,248 @@ public final class UiUtils
     showIf(!TextUtils.isEmpty(text), tv);
   }
 
-  public static void openAppInMarket(Activity activity, String marketUrl)
-  {
-    try
-    {
-      activity.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(marketUrl)));
-    } catch (final Exception e)
-    {
-      e.printStackTrace();
-    }
-  }
-
-  public static void showFacebookPage(Activity activity)
-  {
-    try
-    {
-      // Exception is thrown if we don't have installed Facebook application.
-      activity.getPackageManager().getPackageInfo(Constants.Package.FB_PACKAGE, 0);
-
-      activity.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(Constants.Url.FB_MAPSME_COMMUNITY_NATIVE)));
-    } catch (final Exception e)
-    {
-      activity.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(Constants.Url.FB_MAPSME_COMMUNITY_HTTP)));
-    }
-  }
-
-  public static void showTwitterPage(Activity activity)
-  {
-    Intent intent;
-    intent = new Intent(Intent.ACTION_VIEW, Uri.parse(Constants.Url.TWITTER_MAPSME_HTTP));
-    activity.startActivity(intent);
-  }
-
-  public static void checkConnectionAndShowAlert(final Activity activity, final String message)
-  {
-    if (!ConnectionState.isConnected())
-    {
-      activity.runOnUiThread(new Runnable()
-      {
-        @Override
-        public void run()
-        {
-          new AlertDialog.Builder(activity)
-              .setCancelable(false)
-              .setMessage(message)
-              .setPositiveButton(activity.getString(R.string.connection_settings), new DialogInterface.OnClickListener()
-              {
-                @Override
-                public void onClick(DialogInterface dlg, int which)
-                {
-                  try
-                  {
-                    activity.startActivity(new Intent(Settings.ACTION_WIRELESS_SETTINGS));
-                  } catch (final Exception ex)
-                  {
-                    ex.printStackTrace();
-                  }
-
-                  dlg.dismiss();
-                }
-              })
-              .setNegativeButton(activity.getString(R.string.close), new DialogInterface.OnClickListener()
-              {
-                @Override
-                public void onClick(DialogInterface dlg, int which)
-                {
-                  dlg.dismiss();
-                }
-              })
-              .create()
-              .show();
-        }
-      });
-    }
-  }
-
   public static void showHomeUpButton(Toolbar toolbar)
   {
-    toolbar.setNavigationIcon(R.drawable.abc_ic_ab_back_mtrl_am_alpha);
+    toolbar.setNavigationIcon(ThemeUtils.getResource(toolbar.getContext(), R.attr.homeAsUpIndicator));
   }
-
-  public static AlertDialog buildAlertDialog(Activity activity, int titleId)
-  {
-    return new AlertDialog.Builder(activity)
-        .setCancelable(false)
-        .setMessage(titleId)
-        .setPositiveButton(R.string.ok, new DialogInterface.OnClickListener()
-        {
-          @Override
-          public void onClick(DialogInterface dlg, int which) { dlg.dismiss(); }
-        })
-        .create();
-  }
-
-  public static void showAlertDialog(Activity activity, int titleId)
-  {
-    buildAlertDialog(activity, titleId).show();
-  }
-
 
   public static String deviceOrientationAsString(Activity activity)
   {
     String rotation = activity.getResources().getConfiguration().orientation == Configuration.ORIENTATION_PORTRAIT ? "|" : "-";
     switch (activity.getWindowManager().getDefaultDisplay().getRotation())
     {
-    case Surface.ROTATION_0:
-      rotation += "0";
-      break;
-    case Surface.ROTATION_90:
-      rotation += "90";
-      break;
-    case Surface.ROTATION_180:
-      rotation += "180";
-      break;
-    case Surface.ROTATION_270:
-      rotation += "270";
-      break;
+      case Surface.ROTATION_0:
+        rotation += "0";
+        break;
+      case Surface.ROTATION_90:
+        rotation += "90";
+        break;
+      case Surface.ROTATION_180:
+        rotation += "180";
+        break;
+      case Surface.ROTATION_270:
+        rotation += "270";
+        break;
     }
     return rotation;
   }
 
-  public static boolean isSmallTablet()
-  {
-    return MwmApplication.get().getResources().getBoolean(R.bool.isSmallTablet);
-  }
-
-  public static boolean isBigTablet()
-  {
-    return MwmApplication.get().getResources().getBoolean(R.bool.isBigTablet);
-  }
-
   public static boolean isTablet()
   {
-    return isSmallTablet() || isBigTablet();
-  }
-
-  public static void appearSlidingDown(final View view, @Nullable final Runnable completionListener)
-  {
-    if (view.getVisibility() == View.VISIBLE)
-    {
-      if (completionListener != null)
-        completionListener.run();
-      return;
-    }
-
-    show(view);
-
-    Animation a = AnimationUtils.loadAnimation(view.getContext(), R.anim.slide_appear_down);
-    if (completionListener != null)
-      a.setAnimationListener(new UiUtils.SimpleAnimationListener()
-      {
-        @Override
-        public void onAnimationEnd(Animation animation)
-        {
-          completionListener.run();
-        }
-      });
-
-    view.startAnimation(a);
-  }
-
-  public static void disappearSlidingUp(final View view, @Nullable final Runnable completionListener)
-  {
-    if (view.getVisibility() != View.VISIBLE)
-    {
-      if (completionListener != null)
-        completionListener.run();
-      return;
-    }
-
-    Animation a = AnimationUtils.loadAnimation(view.getContext(), R.anim.slide_disappear_up);
-    a.setAnimationListener(new UiUtils.SimpleAnimationListener()
-    {
-      @Override
-      public void onAnimationEnd(Animation animation)
-      {
-        hide(view);
-        view.clearAnimation();
-
-        if (completionListener != null)
-          completionListener.run();
-      }
-    });
-
-    view.startAnimation(a);
-  }
-
-  public static void exchangeViewsAnimatedDown(final View toHide, final View toShow, @Nullable final Runnable completionListener)
-  {
-    disappearSlidingUp(toHide, new Runnable()
-    {
-      @Override
-      public void run()
-      {
-        appearSlidingDown(toShow, completionListener);
-      }
-    });
+    return MwmApplication.get().getResources().getBoolean(R.bool.tabletLayout);
   }
 
   public static int dimen(@DimenRes int id)
   {
-    return MwmApplication.get().getResources().getDimensionPixelSize(id);
+    return dimen(MwmApplication.get(), id);
   }
 
-  public static int dp(int v)
+  public static int dimen(Context context, @DimenRes int id)
+  {
+    return context.getResources().getDimensionPixelSize(id);
+  }
+
+  public static int toPx(int dp)
   {
     if (sScreenDensity == 0)
       sScreenDensity = MwmApplication.get().getResources().getDisplayMetrics().density;
 
-    return (int) (v * sScreenDensity + 0.5);
+    return (int) (dp * sScreenDensity + 0.5);
+  }
+
+  public static void updateButton(Button button)
+  {
+    button.setTextColor(ThemeUtils.getColor(button.getContext(), button.isEnabled() ? R.attr.buttonTextColor
+                                                                                    : R.attr.buttonTextColorDisabled));
+  }
+
+  public static void updateRedButton(Button button)
+  {
+    button.setTextColor(ThemeUtils.getColor(button.getContext(), button.isEnabled() ? R.attr.redButtonTextColor
+                                                                                    : R.attr.redButtonTextColorDisabled));
+  }
+
+  public static Uri getUriToResId(@NonNull Context context, @AnyRes int resId)
+  {
+    final Resources resources = context.getResources();
+    return Uri.parse(ContentResolver.SCHEME_ANDROID_RESOURCE + "://"
+                         + resources.getResourcePackageName(resId) + '/'
+                         + resources.getResourceTypeName(resId) + '/'
+                         + resources.getResourceEntryName(resId));
+  }
+
+  public static void setInputError(@NonNull TextInputLayout layout, @StringRes int error)
+  {
+    layout.setError(error == 0 ? null : layout.getContext().getString(error));
+    layout.getEditText().setTextColor(error == 0 ? ThemeUtils.getColor(layout.getContext(), android.R.attr.textColorPrimary)
+                                                 : layout.getContext().getResources().getColor(R.color.base_red));
+  }
+
+  public static boolean isLandscape(Context context)
+  {
+    return context.getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
+  }
+
+  public static boolean isViewTouched(@NonNull MotionEvent event, @NonNull View view)
+  {
+    if (UiUtils.isHidden(view))
+      return false;
+
+    int x = (int) event.getX();
+    int y = (int) event.getY();
+    int[] location = new int[2];
+    view.getLocationOnScreen(location);
+    int viewX = location[0];
+    int viewY = location[1];
+    int width = view.getWidth();
+    int height = view.getHeight();
+    Rect viewRect = new Rect(viewX, viewY, viewX + width, viewY + height);
+
+    return viewRect.contains(x, y);
+  }
+
+  public static int getStatusBarHeight(@NonNull Context context)
+  {
+    int result = 0;
+    Resources res = context.getResources();
+    int resourceId = res.getIdentifier("status_bar_height", "dimen", "android");
+    if (resourceId > 0)
+      result = res.getDimensionPixelSize(resourceId);
+
+    return result;
+  }
+
+  public static void extendViewWithStatusBar(@NonNull View view)
+  {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.KITKAT)
+      return;
+
+    int statusBarHeight = getStatusBarHeight(view.getContext());
+    ViewGroup.LayoutParams lp = view.getLayoutParams();
+    lp.height += statusBarHeight;
+    view.setLayoutParams(lp);
+    extendViewPaddingTop(view, statusBarHeight);
+  }
+
+  public static void extendViewPaddingWithStatusBar(@NonNull View view)
+  {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.KITKAT)
+      return;
+
+    int statusBarHeight = getStatusBarHeight(view.getContext());
+    extendViewPaddingTop(view, statusBarHeight);
+  }
+
+  private static void extendViewPaddingTop(@NonNull View view, int statusBarHeight)
+  {
+    view.setPadding(view.getPaddingLeft(), view.getPaddingTop() + statusBarHeight,
+                    view.getPaddingRight(), view.getPaddingBottom());
+  }
+
+  public static void extendViewMarginWithStatusBar(@NonNull View view)
+  {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.KITKAT)
+      return;
+
+    int statusBarHeight = getStatusBarHeight(view.getContext());
+    ViewGroup.MarginLayoutParams lp = (ViewGroup.MarginLayoutParams) view.getLayoutParams();
+    int margin = lp.getMarginStart();
+    lp.setMargins(margin, margin + statusBarHeight, margin, margin);
+    view.setLayoutParams(lp);
+  }
+
+  public static void setupStatusBar(@NonNull Activity activity)
+  {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.KITKAT)
+      return;
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP)
+    {
+      activity.getWindow().getDecorView().setSystemUiVisibility(
+          View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
+    }
+    else
+    {
+      activity.getWindow().addFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS);
+    }
+
+    View statusBarTintView = new View(activity);
+    FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, getStatusBarHeight(activity));
+    params.gravity = Gravity.TOP;
+    statusBarTintView.setLayoutParams(params);
+    statusBarTintView.setBackgroundColor(DEFAULT_TINT_COLOR);
+    statusBarTintView.setVisibility(View.VISIBLE);
+    ViewGroup decorViewGroup = (ViewGroup) activity.getWindow().getDecorView();
+    decorViewGroup.addView(statusBarTintView);
+  }
+
+  public static void setupColorStatusBar(@NonNull Activity activity, @ColorRes int statusBarColor)
+  {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP)
+      return;
+
+    Window window = activity.getWindow();
+    window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
+    window.setStatusBarColor(ContextCompat.getColor(activity, statusBarColor));
+  }
+
+  public static int getCompassYOffset(@NonNull Context context)
+  {
+    return getStatusBarHeight(context);
+  }
+
+  @AnyRes
+  public static int getStyledResourceId(Context context, @AttrRes int res)
+  {
+    TypedArray a = null;
+    try
+    {
+      a = context.obtainStyledAttributes(new int[] {res});
+      return a.getResourceId(0, NO_ID);
+    }
+    finally
+    {
+      if (a != null)
+        a.recycle();
+    }
+  }
+
+  public static void setBackgroundDrawable(View view, @AttrRes int res)
+  {
+    view.setBackgroundResource(getStyledResourceId(view.getContext(), res));
+  }
+
+  public static void expandTouchAreaForView(@NonNull final View view, final int extraArea)
+  {
+    final View parent = (View) view.getParent();
+    parent.post(() ->
+                {
+                  Rect rect = new Rect();
+                  view.getHitRect(rect);
+                  rect.top -= extraArea;
+                  rect.left -= extraArea;
+                  rect.right += extraArea;
+                  rect.bottom += extraArea;
+                  parent.setTouchDelegate(new TouchDelegate(rect, view));
+                });
+  }
+
+  public static void expandTouchAreaForView(@NonNull final View view, final int top, final int left,
+                                            final int bottom, final int right)
+  {
+    final View parent = (View) view.getParent();
+    parent.post(() ->
+                {
+                  Rect rect = new Rect();
+                  view.getHitRect(rect);
+                  rect.top -= top;
+                  rect.left -= left;
+                  rect.right += right;
+                  rect.bottom += bottom;
+                  parent.setTouchDelegate(new TouchDelegate(rect, view));
+                });
   }
 
   // utility class
-  private UiUtils()
-  {}
+  private UiUtils() {}
 }

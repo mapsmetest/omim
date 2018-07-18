@@ -1,5 +1,4 @@
 #pragma once
-#include "target_os.hpp"
 
 #ifdef new
 #undef new
@@ -14,11 +13,7 @@ using std::cerr;
 using std::istream;
 using std::ostream;
 
-#ifndef OMIM_OS_ANDROID
-  using std::wcin;
-  using std::wcout;
-  using std::wcerr;
-#endif
+using std::ios_base;
 
 using std::endl;
 using std::flush;

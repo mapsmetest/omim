@@ -12,10 +12,10 @@ namespace
 
 bool IsTag(string const & str)
 {
-  // tag consists of a-z or A-Z letters and not empty
+  // tag consists of a-z or A-Z letters or _ and not empty
   for (auto const c : str)
   {
-    if (!(c >= 'a' && c <= 'z') && !(c >= 'A' && c <= 'Z'))
+    if (!(c >= 'a' && c <= 'z') && !(c >= 'A' && c <= 'Z') && c != '_')
       return false;
   }
   return !str.empty();
@@ -25,7 +25,7 @@ bool IsTag(string const & str)
 
 bool ParseSelector(string const & str, SelectorExpression & e)
 {
-  // See http://wiki.openstreetmap.org/wiki/MapCSS/0.2
+  // See https://wiki.openstreetmap.org/wiki/MapCSS/0.2
   // Now we support following expressions
   // [tag!=value]
   // [tag>=value]

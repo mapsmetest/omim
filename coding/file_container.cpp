@@ -1,11 +1,15 @@
-#include "base/SRC_FIRST.hpp"
-
 #include "coding/file_container.hpp"
-#include "coding/read_write_utils.hpp"
-#include "coding/write_to_sink.hpp"
+
 #include "coding/internal/file_data.hpp"
+#include "coding/read_write_utils.hpp"
+#include "coding/varint.hpp"
+#include "coding/write_to_sink.hpp"
+
+#include <cstring>
+#include <sstream>
 
 #ifndef OMIM_OS_WINDOWS
+  #include <stdio.h>
   #include <unistd.h>
   #include <sys/mman.h>
   #include <sys/stat.h>
@@ -18,8 +22,12 @@
   #include <windows.h>
 #endif
 
+#include <errno.h>
 
-template <class TSource, class InfoT> void Read(TSource & src, InfoT & i)
+using namespace std;
+
+template <typename Source, typename Info>
+void Read(Source & src, Info & i)
 {
   rw::Read(src, i.m_tag);
 
@@ -27,7 +35,8 @@ template <class TSource, class InfoT> void Read(TSource & src, InfoT & i)
   i.m_size = ReadVarUint<uint64_t>(src);
 }
 
-template <class TSink, class InfoT> void Write(TSink & sink, InfoT const & i)
+template <typename Sink, typename Info>
+void Write(Sink & sink, Info const & i)
 {
   rw::Write(sink, i.m_tag);
 
@@ -46,12 +55,12 @@ string DebugPrint(FilesContainerBase::Info const & info)
 // FilesContainerBase
 /////////////////////////////////////////////////////////////////////////////
 
-template <class ReaderT>
-void FilesContainerBase::ReadInfo(ReaderT & reader)
+template <typename Reader>
+void FilesContainerBase::ReadInfo(Reader & reader)
 {
   uint64_t offset = ReadPrimitiveFromPos<uint64_t>(reader, 0);
 
-  ReaderSource<ReaderT> src(reader);
+  ReaderSource<Reader> src(reader);
   src.Skip(offset);
 
   rw::Read(src, m_info);
@@ -64,36 +73,132 @@ void FilesContainerBase::ReadInfo(ReaderT & reader)
 FilesContainerR::FilesContainerR(string const & filePath,
                                  uint32_t logPageSize,
                                  uint32_t logPageCount)
-  : m_source(new FileReader(filePath, logPageSize, logPageCount))
+  : m_source(make_unique<FileReader>(filePath, logPageSize, logPageCount))
 {
   ReadInfo(m_source);
 }
 
-FilesContainerR::FilesContainerR(ReaderT const & file)
+FilesContainerR::FilesContainerR(TReader const & file)
   : m_source(file)
 {
   ReadInfo(m_source);
 }
 
-FilesContainerR::ReaderT FilesContainerR::GetReader(Tag const & tag) const
+FilesContainerR::TReader FilesContainerR::GetReader(Tag const & tag) const
 {
   Info const * p = GetInfo(tag);
-  if (p)
-    return m_source.SubReader(p->m_offset, p->m_size);
-  else
-    MYTHROW(Reader::OpenException, (tag));
+  if (!p)
+    MYTHROW(Reader::OpenException, ("Can't find section:", GetFileName(), tag));
+  return m_source.SubReader(p->m_offset, p->m_size);
+}
+
+pair<uint64_t, uint64_t> FilesContainerR::GetAbsoluteOffsetAndSize(Tag const & tag) const
+{
+  Info const * p = GetInfo(tag);
+  if (!p)
+    MYTHROW(Reader::OpenException, ("Can't find section:", GetFileName(), tag));
+
+  auto reader = dynamic_cast<FileReader const *>(m_source.GetPtr());
+  uint64_t const offset = reader ? reader->GetOffset() : 0;
+  return make_pair(offset + p->m_offset, p->m_size);
 }
 
 FilesContainerBase::Info const * FilesContainerBase::GetInfo(Tag const & tag) const
 {
-  InfoContainer::const_iterator i =
-    lower_bound(m_info.begin(), m_info.end(), tag, LessInfo());
-
+  auto i = lower_bound(m_info.begin(), m_info.end(), tag, LessInfo());
   if (i != m_info.end() && i->m_tag == tag)
     return &(*i);
   else
     return 0;
 }
+
+namespace detail
+{
+/////////////////////////////////////////////////////////////////////////////
+// MappedFile
+/////////////////////////////////////////////////////////////////////////////
+void MappedFile::Open(string const & fName)
+{
+  Close();
+
+#ifdef OMIM_OS_WINDOWS
+  m_hFile = CreateFileA(fName.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, NULL);
+  if (m_hFile == INVALID_HANDLE_VALUE)
+    MYTHROW(Reader::OpenException, ("Can't open file:", fName, "win last error:", GetLastError()));
+  m_hMapping = CreateFileMappingA(m_hFile, NULL, PAGE_READONLY, 0, 0, NULL);
+  if (m_hMapping == NULL)
+    MYTHROW(Reader::OpenException, ("Can't create file's Windows mapping:", fName, "win last error:", GetLastError()));
+#else
+  m_fd = open(fName.c_str(), O_RDONLY | O_NONBLOCK);
+  if (m_fd == -1)
+  {
+    if (errno == EMFILE || errno == ENFILE)
+    {
+      MYTHROW(Reader::TooManyFilesException,
+              ("Can't open file:", fName, ", reason:", strerror(errno)));
+    }
+    else
+    {
+      MYTHROW(Reader::OpenException, ("Can't open file:", fName, ", reason:", strerror(errno)));
+    }
+  }
+#endif
+}
+
+void MappedFile::Close()
+{
+#ifdef OMIM_OS_WINDOWS
+  if (m_hMapping != INVALID_HANDLE_VALUE)
+  {
+    CloseHandle(m_hMapping);
+    m_hMapping = INVALID_HANDLE_VALUE;
+  }
+  if (m_hFile != INVALID_HANDLE_VALUE)
+  {
+    CloseHandle(m_hFile);
+    m_hFile = INVALID_HANDLE_VALUE;
+  }
+#else
+  if (m_fd != -1)
+  {
+    close(m_fd);
+    m_fd = -1;
+  }
+#endif
+}
+
+MappedFile::Handle MappedFile::Map(uint64_t offset, uint64_t size, string const & tag) const
+{
+#ifdef OMIM_OS_WINDOWS
+  SYSTEM_INFO sysInfo;
+  memset(&sysInfo, 0, sizeof(sysInfo));
+  GetSystemInfo(&sysInfo);
+  long const align = sysInfo.dwAllocationGranularity;
+#else
+  long const align = sysconf(_SC_PAGE_SIZE);
+#endif
+
+  uint64_t const alignedOffset = (offset / align) * align;
+  ASSERT_LESS_OR_EQUAL(alignedOffset, offset, ());
+  uint64_t const length = size + (offset - alignedOffset);
+  ASSERT_GREATER_OR_EQUAL(length, size, ());
+
+#ifdef OMIM_OS_WINDOWS
+  void * pMap = MapViewOfFile(m_hMapping, FILE_MAP_READ, alignedOffset >> (sizeof(DWORD) * 8), DWORD(alignedOffset), length);
+  if (pMap == NULL)
+    MYTHROW(Reader::OpenException, ("Can't map section:", tag, "with [offset, size]:", offset, size, "win last error:", GetLastError()));
+#else
+  void * pMap = mmap(0, length, PROT_READ, MAP_SHARED, m_fd, alignedOffset);
+  if (pMap == MAP_FAILED)
+    MYTHROW(Reader::OpenException, ("Can't map section:", tag, "with [offset, size]:", offset, size, "errno:", strerror(errno)));
+#endif
+
+  char const * data = reinterpret_cast<char const *>(pMap);
+  char const * d = data + (offset - alignedOffset);
+  return Handle(d, data, size, length);
+}
+
+} // namespace detail
 
 /////////////////////////////////////////////////////////////////////////////
 // FilesMappingContainer
@@ -111,43 +216,19 @@ FilesMappingContainer::~FilesMappingContainer()
 
 void FilesMappingContainer::Open(string const & fName)
 {
-  Close();
-
   {
     FileReader reader(fName);
     ReadInfo(reader);
   }
 
-#ifdef OMIM_OS_WINDOWS
-  m_hFile = CreateFileA(fName.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, NULL);
-  if (m_hFile == INVALID_HANDLE_VALUE)
-    MYTHROW(Reader::OpenException, ("Can't open file:", fName, "win last error:", GetLastError()));
-  m_hMapping = CreateFileMappingA(m_hFile, NULL, PAGE_READONLY, 0, 0, NULL);
-  if (m_hMapping == NULL)
-    MYTHROW(Reader::OpenException, ("Can't create file's Windows mapping:", fName, "win last error:", GetLastError()));
-#else
-  m_fd = open(fName.c_str(), O_RDONLY | O_NONBLOCK);
-  if (m_fd == -1)
-    MYTHROW(Reader::OpenException, ("Can't open file:", fName));
-#endif
+  m_file.Open(fName);
 
   m_name = fName;
 }
 
 void FilesMappingContainer::Close()
 {
-#ifdef OMIM_OS_WINDOWS
-  if (m_hMapping != INVALID_HANDLE_VALUE)
-    CloseHandle(m_hMapping);
-  if (m_hFile != INVALID_HANDLE_VALUE)
-    CloseHandle(m_hFile);
-#else
-  if (m_fd != -1)
-  {
-    close(m_fd);
-    m_fd = -1;
-  }
-#endif
+  m_file.Close();
 
   m_name.clear();
 }
@@ -155,49 +236,19 @@ void FilesMappingContainer::Close()
 FilesMappingContainer::Handle FilesMappingContainer::Map(Tag const & tag) const
 {
   Info const * p = GetInfo(tag);
-  if (p)
-  {
-#ifdef OMIM_OS_WINDOWS
-    SYSTEM_INFO sysInfo;
-    memset(&sysInfo, 0, sizeof(sysInfo));
-    GetSystemInfo(&sysInfo);
-    long const offsetAlign = sysInfo.dwAllocationGranularity;
-#else
-    long const offsetAlign = sysconf(_SC_PAGE_SIZE);
-#endif
+  if (!p)
+    MYTHROW(Reader::OpenException, ("Can't find section:", m_name, tag));
 
-    uint64_t const offset = (p->m_offset / offsetAlign) * offsetAlign;
-    ASSERT_LESS_OR_EQUAL(offset, p->m_offset, ());
-    uint64_t const length = p->m_size + (p->m_offset - offset);
-    ASSERT_GREATER_OR_EQUAL(length, p->m_size, ());
-
-#ifdef OMIM_OS_WINDOWS
-    void * pMap = MapViewOfFile(m_hMapping, FILE_MAP_READ, offset >> (sizeof(DWORD) * 8), DWORD(offset), length);
-    if (pMap == NULL)
-      MYTHROW(Reader::OpenException, ("Can't map section:", tag, "with [offset, size]:", *p, "win last error:", GetLastError()));
-#else
-    void * pMap = mmap(0, length, PROT_READ, MAP_SHARED, m_fd, offset);
-    if (pMap == MAP_FAILED)
-      MYTHROW(Reader::OpenException, ("Can't map section:", tag, "with [offset, size]:", *p));
-#endif
-
-    char const * data = reinterpret_cast<char const *>(pMap);
-    char const * d = data + (p->m_offset - offset);
-    return Handle(d, data, p->m_size, length);
-  }
-  else
-    MYTHROW(Reader::OpenException, ("Can't find section:", tag));
-
-  return Handle();
+  ASSERT_EQUAL(tag, p->m_tag, ());
+  return m_file.Map(p->m_offset, p->m_size, tag);
 }
 
 FileReader FilesMappingContainer::GetReader(Tag const & tag) const
 {
   Info const * p = GetInfo(tag);
-  if (p)
-    return FileReader(m_name).SubReader(p->m_offset, p->m_size);
-  else
-    MYTHROW(Reader::OpenException, ("Can't find section:", tag));
+  if (!p)
+    MYTHROW(Reader::OpenException, ("Can't find section:", m_name, tag));
+  return FileReader(m_name).SubReader(p->m_offset, p->m_size);
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -245,14 +296,14 @@ void FilesMappingContainer::Handle::Reset()
 /////////////////////////////////////////////////////////////////////////////
 
 FilesContainerW::FilesContainerW(string const & fName, FileWriter::Op op)
-: m_name(fName), m_bFinished(false)
+  : m_name(fName), m_finished(false)
 {
   Open(op);
 }
 
 void FilesContainerW::Open(FileWriter::Op op)
 {
-  m_bNeedRewrite = true;
+  m_needRewrite = true;
 
   switch (op)
   {
@@ -293,18 +344,18 @@ void FilesContainerW::StartNew()
   FileWriter writer(m_name);
   uint64_t skip = 0;
   writer.Write(&skip, sizeof(skip));
-  m_bNeedRewrite = false;
+  m_needRewrite = false;
 }
 
 FilesContainerW::~FilesContainerW()
 {
-  if (!m_bFinished)
+  if (!m_finished)
     Finish();
 }
 
 uint64_t FilesContainerW::SaveCurrentSize()
 {
-  ASSERT(!m_bFinished, ());
+  ASSERT(!m_finished, ());
   uint64_t const curr = FileReader(m_name).Size();
   if (!m_info.empty())
     m_info.back().m_size = curr - m_info.back().m_offset;
@@ -335,7 +386,7 @@ void FilesContainerW::DeleteSection(Tag const & tag)
 
 FileWriter FilesContainerW::GetWriter(Tag const & tag)
 {
-  ASSERT(!m_bFinished, ());
+  ASSERT(!m_finished, ());
 
   InfoContainer::const_iterator it = find_if(m_info.begin(), m_info.end(), EqualTag(tag));
   if (it != m_info.end())
@@ -347,7 +398,7 @@ FileWriter FilesContainerW::GetWriter(Tag const & tag)
       if (m_info.empty())
         StartNew();
       else
-        m_bNeedRewrite = true;
+        m_needRewrite = true;
     }
     else
     {
@@ -355,9 +406,9 @@ FileWriter FilesContainerW::GetWriter(Tag const & tag)
     }
   }
 
-  if (m_bNeedRewrite)
+  if (m_needRewrite)
   {
-    m_bNeedRewrite = false;
+    m_needRewrite = false;
     ASSERT(!m_info.empty(), ());
 
     uint64_t const curr = m_info.back().m_offset + m_info.back().m_size;
@@ -381,7 +432,7 @@ FileWriter FilesContainerW::GetWriter(Tag const & tag)
 
 void FilesContainerW::Write(string const & fPath, Tag const & tag)
 {
-  Write(new FileReader(fPath), tag);
+  Write(ModelReaderPtr(make_unique<FileReader>(fPath)), tag);
 }
 
 void FilesContainerW::Write(ModelReaderPtr reader, Tag const & tag)
@@ -395,12 +446,18 @@ void FilesContainerW::Write(ModelReaderPtr reader, Tag const & tag)
 void FilesContainerW::Write(vector<char> const & buffer, Tag const & tag)
 {
   if (!buffer.empty())
-    GetWriter(tag).Write(&buffer[0], buffer.size());
+    GetWriter(tag).Write(buffer.data(), buffer.size());
+}
+
+void FilesContainerW::Write(vector<uint8_t> const & buffer, Tag const & tag)
+{
+  if (!buffer.empty())
+    GetWriter(tag).Write(buffer.data(), buffer.size());
 }
 
 void FilesContainerW::Finish()
 {
-  ASSERT(!m_bFinished, ());
+  ASSERT(!m_finished, ());
 
   uint64_t const curr = SaveCurrentSize();
 
@@ -413,5 +470,5 @@ void FilesContainerW::Finish()
 
   rw::Write(writer, m_info);
 
-  m_bFinished = true;
+  m_finished = true;
 }

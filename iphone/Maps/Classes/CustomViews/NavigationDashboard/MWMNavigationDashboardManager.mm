@@ -1,121 +1,449 @@
-#import "Common.h"
-#import "Macros.h"
-#import "MapsAppDelegate.h"
-#import "MWMLanesPanel.h"
-#import "MWMNavigationDashboard.h"
-#import "MWMNavigationDashboardEntity.h"
+#import "MWMMapViewControlsManager.h"
 #import "MWMNavigationDashboardManager.h"
-#import "MWMNextTurnPanel.h"
-#import "MWMRouteHelperPanelsDrawer.h"
+#import "MWMNavigationInfoView.h"
 #import "MWMRoutePreview.h"
-#import "MWMTextToSpeech.h"
+#import "MWMSearch.h"
+#import "MapViewController.h"
 
-@interface MWMNavigationDashboardManager ()
+#import <AudioToolbox/AudioServices.h>
+#import <Crashlytics/Crashlytics.h>
+#import "SwiftBridge.h"
 
-@property (nonatomic) IBOutlet MWMRoutePreview * routePreviewLandscape;
-@property (nonatomic) IBOutlet MWMRoutePreview * routePreviewPortrait;
-@property (weak, nonatomic) MWMRoutePreview * routePreview;
+#include "platform/platform.hpp"
 
-@property (nonatomic) IBOutlet MWMNavigationDashboard * navigationDashboardLandscape;
-@property (nonatomic) IBOutlet MWMNavigationDashboard * navigationDashboardPortrait;
-@property (weak, nonatomic) MWMNavigationDashboard * navigationDashboard;
+extern NSString * const kAlohalyticsTapEventKey;
 
-@property (weak, nonatomic) UIView * ownerView;
-@property (weak, nonatomic) id<MWMNavigationDashboardManagerProtocol> delegate;
+namespace
+{
+NSString * const kRoutePreviewIPADXibName = @"MWMiPadRoutePreview";
+NSString * const kRoutePreviewIPhoneXibName = @"MWMiPhoneRoutePreview";
+NSString * const kNavigationInfoViewXibName = @"MWMNavigationInfoView";
+NSString * const kNavigationControlViewXibName = @"NavigationControlView";
 
-@property (nonatomic) MWMNavigationDashboardEntity * entity;
-@property (nonatomic) MWMTextToSpeech * tts;
-//@property (nonatomic) MWMLanesPanel * lanesPanel;
-@property (nonatomic) MWMNextTurnPanel * nextTurnPanel;
-@property (nonatomic) MWMRouteHelperPanelsDrawer * drawer;
-@property (nonatomic) NSMutableArray * helperPanels;
+using Observer = id<MWMNavigationDashboardObserver>;
+using Observers = NSHashTable<Observer>;
+}  // namespace
+
+@interface MWMMapViewControlsManager ()
+
+@property(nonatomic) MWMNavigationDashboardManager * navigationManager;
+
+@end
+
+@interface MWMNavigationDashboardManager ()<MWMSearchManagerObserver>
+
+@property(copy, nonatomic) NSDictionary * etaAttributes;
+@property(copy, nonatomic) NSDictionary * etaSecondaryAttributes;
+@property(copy, nonatomic) NSString * errorMessage;
+@property(nonatomic) IBOutlet MWMBaseRoutePreviewStatus * baseRoutePreviewStatus;
+@property(nonatomic) IBOutlet MWMNavigationControlView * navigationControlView;
+@property(nonatomic) IBOutlet MWMNavigationInfoView * navigationInfoView;
+@property(nonatomic) IBOutlet MWMRoutePreview * routePreview;
+@property(nonatomic) IBOutlet MWMTransportRoutePreviewStatus * transportRoutePreviewStatus;
+@property(nonatomic) IBOutletCollection(MWMRouteStartButton) NSArray * goButtons;
+@property(nonatomic) MWMNavigationDashboardEntity * entity;
+@property(nonatomic) MWMRouteManagerTransitioningManager * routeManagerTransitioningManager;
+@property(nonatomic) Observers * observers;
+@property(nonatomic, readwrite) MWMTaxiPreviewDataSource * taxiDataSource;
+@property(weak, nonatomic) IBOutlet MWMTaxiCollectionView * taxiCollectionView;
+@property(weak, nonatomic) IBOutlet UIButton * showRouteManagerButton;
+@property(weak, nonatomic) IBOutlet UIView * goButtonsContainer;
+@property(weak, nonatomic) UIView * ownerView;
 
 @end
 
 @implementation MWMNavigationDashboardManager
 
-- (instancetype)initWithParentView:(UIView *)view delegate:(id<MWMNavigationDashboardManagerProtocol>)delegate
++ (MWMNavigationDashboardManager *)manager
+{
+  return [MWMMapViewControlsManager manager].navigationManager;
+}
+
+- (instancetype)initWithParentView:(UIView *)view
 {
   self = [super init];
   if (self)
   {
-    self.ownerView = view;
-    self.delegate = delegate;
-    BOOL const isPortrait = self.ownerView.width < self.ownerView.height;
-
-    [NSBundle.mainBundle loadNibNamed:@"MWMPortraitRoutePreview" owner:self options:nil];
-    [NSBundle.mainBundle loadNibNamed:@"MWMLandscapeRoutePreview" owner:self options:nil];
-    self.routePreview = isPortrait ? self.routePreviewPortrait : self.routePreviewLandscape;
-    self.routePreviewPortrait.delegate = self.routePreviewLandscape.delegate = delegate;
-    if (IPAD)
-    {
-      [NSBundle.mainBundle loadNibNamed:@"MWMNiPadNavigationDashboard" owner:self options:nil];
-      self.navigationDashboard = self.navigationDashboardPortrait;
-      self.navigationDashboard.delegate = delegate;
-    }
-    else
-    {
-      [NSBundle.mainBundle loadNibNamed:@"MWMPortraitNavigationDashboard" owner:self options:nil];
-      [NSBundle.mainBundle loadNibNamed:@"MWMLandscapeNavigationDashboard" owner:self options:nil];
-      self.navigationDashboard = isPortrait ? self.navigationDashboardPortrait : self.navigationDashboardLandscape;
-      self.navigationDashboardPortrait.delegate = self.navigationDashboardLandscape.delegate = delegate;
-    }
-    self.tts = [[MWMTextToSpeech alloc] init];
-    self.helperPanels = [NSMutableArray array];
+    _ownerView = view;
+    _observers = [Observers weakObjectsHashTable];
   }
   return self;
 }
 
-#pragma mark - Layout
-
-- (void)willRotateToInterfaceOrientation:(UIInterfaceOrientation)orientation
+- (void)loadPreviewWithStatusBoxes
 {
-  [self updateInterface:UIInterfaceOrientationIsPortrait(orientation)];
+  [NSBundle.mainBundle loadNibNamed:IPAD ? kRoutePreviewIPADXibName : kRoutePreviewIPhoneXibName
+                              owner:self
+                            options:nil];
+  auto ownerView = self.ownerView;
+  _baseRoutePreviewStatus.ownerView = ownerView;
+  _transportRoutePreviewStatus.ownerView = ownerView;
 }
 
-- (void)viewWillTransitionToSize:(CGSize)size
-       withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator
+#pragma mark - MWMRoutePreview
+
+- (void)setRouteBuilderProgress:(CGFloat)progress
 {
-  [self updateInterface:size.height > size.width];
+  [self.routePreview router:[MWMRouter type] setProgress:progress / 100.];
 }
 
-- (void)updateInterface:(BOOL)isPortrait
+#pragma mark - MWMNavigationGo
+
+- (IBAction)routingStartTouchUpInside { [MWMRouter startRouting]; }
+- (void)updateGoButtonTitle
 {
-  MWMRoutePreview * routePreview = isPortrait ? self.routePreviewPortrait : self.routePreviewLandscape;
-  if (self.routePreview.isVisible && ![routePreview isEqual:self.routePreview])
+  NSString * title = nil;
+  if ([MWMRouter isTaxi])
+    title = [self.taxiDataSource isTaxiInstalled] ? L(@"taxi_order") : L(@"install_app");
+  else
+    title = L(@"p2p_start");
+
+  for (MWMRouteStartButton * button in self.goButtons)
+    [button setTitle:title forState:UIControlStateNormal];
+}
+
+- (void)mwm_refreshUI
+{
+  [_routePreview mwm_refreshUI];
+  [_navigationInfoView mwm_refreshUI];
+  [_navigationControlView mwm_refreshUI];
+  [_baseRoutePreviewStatus mwm_refreshUI];
+  [_transportRoutePreviewStatus mwm_refreshUI];
+  _etaAttributes = nil;
+  _etaSecondaryAttributes = nil;
+}
+
+- (void)onNavigationInfoUpdated
+{
+  auto entity = self.entity;
+  if (!entity.isValid)
+    return;
+  [_navigationInfoView onNavigationInfoUpdated:entity];
+  if ([MWMRouter type] == MWMRouterTypePublicTransport)
+    [_transportRoutePreviewStatus onNavigationInfoUpdated:entity];
+  else
+    [_baseRoutePreviewStatus onNavigationInfoUpdated:entity];
+  [_navigationControlView onNavigationInfoUpdated:entity];
+}
+
+#pragma mark - On route updates
+
+- (void)onRoutePrepare { self.state = MWMNavigationDashboardStatePrepare; }
+- (void)onRoutePlanning { self.state = MWMNavigationDashboardStatePlanning; }
+- (void)onRouteError:(NSString *)error
+{
+  self.errorMessage = error;
+  self.state = MWMNavigationDashboardStateError;
+}
+
+- (void)onRouteReady
+{
+  if (self.state != MWMNavigationDashboardStateNavigation && ![MWMRouter isTaxi])
+    self.state = MWMNavigationDashboardStateReady;
+}
+
+- (void)onRoutePointsUpdated
+{
+  if (self.state == MWMNavigationDashboardStateHidden)
+    self.state = MWMNavigationDashboardStatePrepare;
+  [self.navigationInfoView updateToastView];
+}
+
+#pragma mark - State changes
+
+- (void)stateHidden
+{
+  self.taxiDataSource = nil;
+  self.routePreview = nil;
+  self.navigationInfoView.state = MWMNavigationInfoViewStateHidden;
+  self.navigationInfoView = nil;
+  _navigationControlView.isVisible = NO;
+  _navigationControlView = nil;
+  [_baseRoutePreviewStatus hide];
+  _baseRoutePreviewStatus = nil;
+  [_transportRoutePreviewStatus hide];
+  _transportRoutePreviewStatus = nil;
+}
+
+- (void)statePrepare
+{
+  self.navigationInfoView.state = MWMNavigationInfoViewStatePrepare;
+  auto routePreview = self.routePreview;
+  [routePreview addToView:self.ownerView];
+  [routePreview statePrepare];
+  [routePreview selectRouter:[MWMRouter type]];
+  [self updateGoButtonTitle];
+  [_baseRoutePreviewStatus hide];
+  [_transportRoutePreviewStatus hide];
+  for (MWMRouteStartButton * button in self.goButtons)
+    [button statePrepare];
+}
+
+- (void)statePlanning
+{
+  [self statePrepare];
+  [self.routePreview router:[MWMRouter type] setState:MWMCircularProgressStateSpinner];
+  [self setRouteBuilderProgress:0.];
+  if (![MWMRouter isTaxi])
+    return;
+
+  auto pFrom = [MWMRouter startPoint];
+  auto pTo = [MWMRouter finishPoint];
+  if (!pFrom || !pTo)
+    return;
+  if (!Platform::IsConnected())
   {
-    [self.routePreview remove];
-    [routePreview addToView:self.ownerView];
-  }
-  self.routePreview = routePreview;
-  if (IPAD)
+    [[MapViewController controller].alertController presentNoConnectionAlert];
+    [self onRouteError:L(@"dialog_taxi_offline")];
     return;
+  }
+  __weak auto wSelf = self;
+  [self.taxiDataSource requestTaxiFrom:pFrom
+      to:pTo
+      completion:^{
+        wSelf.state = MWMNavigationDashboardStateReady;
+      }
+      failure:^(NSString * error) {
+        [wSelf onRouteError:error];
+      }];
+}
 
-  MWMNavigationDashboard * navigationDashboard = isPortrait ? self.navigationDashboardPortrait :
-  self.navigationDashboardLandscape;
-  if (self.navigationDashboard.isVisible && ![navigationDashboard isEqual:self.navigationDashboard])
+- (void)stateError
+{
+  NSAssert(_state == MWMNavigationDashboardStatePlanning, @"Invalid state change (error)");
+  auto routePreview = self.routePreview;
+  [routePreview router:[MWMRouter type] setState:MWMCircularProgressStateFailed];
+  [self updateGoButtonTitle];
+  [self.baseRoutePreviewStatus showErrorWithMessage:self.errorMessage];
+  for (MWMRouteStartButton * button in self.goButtons)
+    [button stateError];
+}
+
+- (void)stateReady
+{
+  NSAssert(_state == MWMNavigationDashboardStatePlanning, @"Invalid state change (ready)");
+  [self setRouteBuilderProgress:100.];
+  [self updateGoButtonTitle];
+  auto const isTransport = ([MWMRouter type] == MWMRouterTypePublicTransport);
+  if (isTransport)
+    [self.transportRoutePreviewStatus showReady];
+  else
+    [self.baseRoutePreviewStatus showReady];
+  self.goButtonsContainer.hidden = isTransport;
+  for (MWMRouteStartButton * button in self.goButtons)
+    [button stateReady];
+}
+
+- (void)onRouteStart { self.state = MWMNavigationDashboardStateNavigation; }
+- (void)onRouteStop { self.state = MWMNavigationDashboardStateHidden; }
+- (void)stateNavigation
+{
+  self.routePreview = nil;
+  self.navigationInfoView.state = MWMNavigationInfoViewStateNavigation;
+  self.navigationControlView.isVisible = YES;
+  [_baseRoutePreviewStatus hide];
+  _baseRoutePreviewStatus = nil;
+  [_transportRoutePreviewStatus hide];
+  _transportRoutePreviewStatus = nil;
+  [self onNavigationInfoUpdated];
+}
+
+#pragma mark - MWMRoutePreviewStatus
+
+- (IBAction)showRouteManager
+{
+  auto routeManagerViewModel = [[MWMRouteManagerViewModel alloc] init];
+  auto routeManager =
+      [[MWMRouteManagerViewController alloc] initWithViewModel:routeManagerViewModel];
+  routeManager.modalPresentationStyle = UIModalPresentationCustom;
+  if (IPAD)
   {
-    [self.navigationDashboard remove];
-    [navigationDashboard addToView:self.ownerView];
+    self.routeManagerTransitioningManager = [[MWMRouteManagerTransitioningManager alloc]
+        initWithPopoverSourceView:self.showRouteManagerButton
+         permittedArrowDirections:UIPopoverArrowDirectionLeft];
   }
-  self.navigationDashboard = navigationDashboard;
-  [self.drawer invalidateTopBounds:self.helperPanels topView:self.navigationDashboard];
+  else
+  {
+    self.routeManagerTransitioningManager = [[MWMRouteManagerTransitioningManager alloc] init];
+  }
+  routeManager.transitioningDelegate = self.routeManagerTransitioningManager;
+  [[MapViewController controller] presentViewController:routeManager animated:YES completion:nil];
 }
 
-- (void)hideHelperPanels
+#pragma mark - MWMNavigationControlView
+
+- (IBAction)ttsButtonAction
 {
-  if (IPAD)
-    return;
-  for (MWMRouteHelperPanel * p in self.helperPanels)
-    [UIView animateWithDuration:kDefaultAnimationDuration animations:^{ p.alpha = 0.; }];
+  BOOL const isEnabled = [MWMTextToSpeech tts].active;
+  [Statistics logEvent:kStatMenu withParameters:@{kStatTTS : isEnabled ? kStatOn : kStatOff}];
+  [MWMTextToSpeech tts].active = !isEnabled;
 }
 
-- (void)showHelperPanels
+- (IBAction)trafficButtonAction
 {
-  if (IPAD)
+  BOOL const switchOn = ([MWMTrafficManager state] == MWMTrafficManagerStateDisabled);
+  [Statistics logEvent:kStatMenu withParameters:@{kStatTraffic : switchOn ? kStatOn : kStatOff}];
+  [MWMTrafficManager enableTraffic:switchOn];
+}
+
+- (IBAction)settingsButtonAction
+{
+  [Statistics logEvent:kStatMenu withParameters:@{kStatButton : kStatSettings}];
+  [Alohalytics logEvent:kAlohalyticsTapEventKey withValue:@"settingsAndMore"];
+  [[MapViewController controller] performSegueWithIdentifier:@"Map2Settings" sender:nil];
+}
+
+- (IBAction)stopRoutingButtonAction
+{
+  [MWMSearch clear];
+  [MWMRouter stopRouting];
+}
+
+#pragma mark - Add/Remove Observers
+
++ (void)addObserver:(id<MWMNavigationDashboardObserver>)observer
+{
+  [[self manager].observers addObject:observer];
+}
+
++ (void)removeObserver:(id<MWMNavigationDashboardObserver>)observer
+{
+  [[self manager].observers removeObject:observer];
+}
+
+#pragma mark - MWMNavigationDashboardObserver
+
+- (void)onNavigationDashboardStateChanged
+{
+  for (Observer observer in self.observers)
+    [observer onNavigationDashboardStateChanged];
+}
+
+#pragma mark - MWMSearchManagerObserver
+
+- (void)onSearchManagerStateChanged
+{
+  auto state = [MWMSearchManager manager].state;
+  if (state == MWMSearchManagerStateMapSearch)
+    [self setMapSearch];
+}
+
+#pragma mark - Available area
+
++ (void)updateNavigationInfoAvailableArea:(CGRect)frame
+{
+  [[self manager] updateNavigationInfoAvailableArea:frame];
+}
+
+- (void)updateNavigationInfoAvailableArea:(CGRect)frame
+{
+  _navigationInfoView.availableArea = frame;
+}
+#pragma mark - Properties
+
+- (NSDictionary *)etaAttributes
+{
+  if (!_etaAttributes)
+  {
+    _etaAttributes = @{
+      NSForegroundColorAttributeName : [UIColor blackPrimaryText],
+      NSFontAttributeName : [UIFont medium17]
+    };
+  }
+  return _etaAttributes;
+}
+
+- (NSDictionary *)etaSecondaryAttributes
+{
+  if (!_etaSecondaryAttributes)
+  {
+    _etaSecondaryAttributes = @{
+      NSForegroundColorAttributeName: [UIColor blackSecondaryText],
+      NSFontAttributeName: [UIFont medium17]
+    };
+  }
+  return _etaSecondaryAttributes;
+}
+
+- (void)setState:(MWMNavigationDashboardState)state
+{
+  if (_state == state)
     return;
-  for (MWMRouteHelperPanel * p in self.helperPanels)
-    [UIView animateWithDuration:kDefaultAnimationDuration animations:^{ p.alpha = 1.; }];
+  if (state == MWMNavigationDashboardStateHidden)
+    [MWMSearchManager removeObserver:self];
+  else
+    [MWMSearchManager addObserver:self];
+  switch (state)
+  {
+  case MWMNavigationDashboardStateHidden: [self stateHidden]; break;
+  case MWMNavigationDashboardStatePrepare: [self statePrepare]; break;
+  case MWMNavigationDashboardStatePlanning: [self statePlanning]; break;
+  case MWMNavigationDashboardStateError: [self stateError]; break;
+  case MWMNavigationDashboardStateReady: [self stateReady]; break;
+  case MWMNavigationDashboardStateNavigation: [self stateNavigation]; break;
+  }
+  _state = state;
+  [[MapViewController controller] updateStatusBarStyle];
+  [self onNavigationDashboardStateChanged];
+}
+
+- (MWMTaxiPreviewDataSource *)taxiDataSource
+{
+  if (!_taxiDataSource)
+    _taxiDataSource =
+        [[MWMTaxiPreviewDataSource alloc] initWithCollectionView:self.taxiCollectionView];
+  return _taxiDataSource;
+}
+
+@synthesize routePreview = _routePreview;
+- (MWMRoutePreview *)routePreview
+{
+  if (!_routePreview)
+    [self loadPreviewWithStatusBoxes];
+  return _routePreview;
+}
+
+- (void)setRoutePreview:(MWMRoutePreview *)routePreview
+{
+  if (routePreview == _routePreview)
+    return;
+  [_routePreview remove];
+  _routePreview = routePreview;
+}
+
+- (MWMBaseRoutePreviewStatus *)baseRoutePreviewStatus
+{
+  if (!_baseRoutePreviewStatus)
+    [self loadPreviewWithStatusBoxes];
+  return _baseRoutePreviewStatus;
+}
+
+- (MWMTransportRoutePreviewStatus *)transportRoutePreviewStatus
+{
+  if (!_transportRoutePreviewStatus)
+    [self loadPreviewWithStatusBoxes];
+  return _transportRoutePreviewStatus;
+}
+
+- (MWMNavigationInfoView *)navigationInfoView
+{
+  if (!_navigationInfoView)
+  {
+    [NSBundle.mainBundle loadNibNamed:kNavigationInfoViewXibName owner:self options:nil];
+    _navigationInfoView.state = MWMNavigationInfoViewStateHidden;
+    _navigationInfoView.ownerView = self.ownerView;
+  }
+  return _navigationInfoView;
+}
+
+- (MWMNavigationControlView *)navigationControlView
+{
+  if (!_navigationControlView)
+  {
+    [NSBundle.mainBundle loadNibNamed:kNavigationControlViewXibName owner:self options:nil];
+    _navigationControlView.ownerView = self.ownerView;
+  }
+  return _navigationControlView;
 }
 
 - (MWMNavigationDashboardEntity *)entity
@@ -125,302 +453,9 @@
   return _entity;
 }
 
-- (void)setupDashboard:(location::FollowingInfo const &)info
+- (void)setMapSearch
 {
-  [self.entity updateWithFollowingInfo:info];
-  [self updateDashboard];
-}
-
-- (void)playTurnNotifications
-{
-  [self.tts playTurnNotifications];
-}
-
-- (void)handleError
-{
-  [self.routePreviewPortrait stateError];
-  [self.routePreviewLandscape stateError];
-}
-
-- (void)updateDashboard
-{
-  [self.routePreviewLandscape configureWithEntity:self.entity];
-  [self.routePreviewPortrait configureWithEntity:self.entity];
-  [self.navigationDashboardLandscape configureWithEntity:self.entity];
-  [self.navigationDashboardPortrait configureWithEntity:self.entity];
-  if (self.state != MWMNavigationDashboardStateNavigation)
-    return;
-//  if (self.entity.lanes.size())
-//  {
-//    [self.lanesPanel configureWithLanes:self.entity.lanes];
-//    [self addPanel:self.lanesPanel];
-//  }
-//  else
-//  {
-//    [self removePanel:self.lanesPanel];
-//  }
-  if (self.entity.nextTurnImage)
-  {
-    [self.nextTurnPanel configureWithImage:self.entity.nextTurnImage];
-    [self addPanel:self.nextTurnPanel];
-  }
-  else
-  {
-    [self removePanel:self.nextTurnPanel];
-  }
-  [self.drawer drawPanels:self.helperPanels];
-  [self.navigationDashboard setNeedsLayout];
-}
-
-- (void)addPanel:(MWMRouteHelperPanel *)panel
-{
-  switch (self.helperPanels.count)
-  {
-    case 0:
-      [self.helperPanels addObject:panel];
-      return;
-    case 1:
-      if (![self.helperPanels.firstObject isKindOfClass:panel.class])
-      {
-        [self.helperPanels addObject:panel];
-        return;
-      }
-      return;
-    case 2:
-      for (MWMRouteHelperPanel * p in self.helperPanels)
-      {
-        if ([p isEqual:panel])
-          continue;
-
-        if ([p isKindOfClass:panel.class])
-        {
-          NSUInteger const index = [self.helperPanels indexOfObject:p];
-          self.helperPanels[index] = panel;
-        }
-      }
-      return;
-    default:
-      NSAssert(false, @"Incorrect array size!");
-      break;
-  }
-}
-
-- (void)removePanel:(MWMRouteHelperPanel *)panel
-{
-  if ([self.helperPanels containsObject:panel])
-    [self.helperPanels removeObject:panel];
-  panel.hidden = YES;
-}
-
-#pragma mark - MWMRoutePreview
-
-- (IBAction)routePreviewChange:(UIButton *)sender
-{
-  if (sender.selected)
-    return;
-  sender.selected = YES;
-  auto & f = GetFramework();
-  if ([sender isEqual:self.routePreview.pedestrian])
-  {
-    self.routePreview.vehicle.selected = NO;
-    f.SetRouter(routing::RouterType::Pedestrian);
-  }
-  else
-  {
-    self.routePreview.pedestrian.selected = NO;
-    f.SetRouter(routing::RouterType::Vehicle);
-  }
-  f.CloseRouting();
-  [self showStatePlanning];
-  [self.delegate buildRouteWithType:f.GetRouter()];
-}
-
-- (void)setRouteBuildingProgress:(CGFloat)progress
-{
-  [self.routePreviewLandscape setRouteBuildingProgress:progress];
-  [self.routePreviewPortrait setRouteBuildingProgress:progress];
-}
-
-#pragma mark - MWMNavigationDashboard
-
-- (IBAction)navigationCancelPressed:(UIButton *)sender
-{
-  self.state = MWMNavigationDashboardStateHidden;
-  [self removePanel:self.nextTurnPanel];
-//  [self removePanel:self.lanesPanel];
-  self.helperPanels = [NSMutableArray array];
-  [self.delegate didCancelRouting];
-}
-
-#pragma mark - MWMNavigationGo
-
-- (IBAction)navigationGoPressed:(UIButton *)sender
-{
-  self.state = MWMNavigationDashboardStateNavigation;
-  [self.delegate didStartFollowing];
-}
-
-#pragma mark - State changes
-
-- (void)hideState
-{
-  [self.routePreview remove];
-  [self.navigationDashboard remove];
-  [self removePanel:self.nextTurnPanel];
-//  [self removePanel:self.lanesPanel];
-}
-
-- (void)showStatePlanning
-{
-  [self.navigationDashboard remove];
-  [self.routePreview addToView:self.ownerView];
-  [self.routePreviewLandscape statePlaning];
-  [self.routePreviewPortrait statePlaning];
-  [self removePanel:self.nextTurnPanel];
-//  [self removePanel:self.lanesPanel];
-  auto const state = GetFramework().GetRouter();
-  switch (state)
-  {
-    case routing::RouterType::Pedestrian:
-      self.routePreviewLandscape.pedestrian.selected = YES;
-      self.routePreviewPortrait.pedestrian.selected = YES;
-      self.routePreviewPortrait.vehicle.selected = NO;
-      self.routePreviewLandscape.vehicle.selected = NO;
-      break;
-    case routing::RouterType::Vehicle:
-      self.routePreviewLandscape.vehicle.selected = YES;
-      self.routePreviewPortrait.vehicle.selected = YES;
-      self.routePreviewLandscape.pedestrian.selected = NO;
-      self.routePreviewPortrait.pedestrian.selected = NO;
-      break;
-  }
-}
-
-- (void)showStateReady
-{
-  [self showGoButton:YES];
-}
-
-- (void)showStateNavigation
-{
-  [self.routePreview remove];
-  [self.navigationDashboard addToView:self.ownerView];
-}
-
-- (void)showGoButton:(BOOL)show
-{
-  [self.routePreviewPortrait showGoButtonAnimated:show];
-  [self.routePreviewLandscape showGoButtonAnimated:show];
-}
-
-#pragma mark - Properties
-
-- (MWMRouteHelperPanelsDrawer *)drawer
-{
-  if (!_drawer)
-    _drawer = [[MWMRouteHelperPanelsDrawer alloc] initWithTopView:self.navigationDashboard];
-  return _drawer;
-}
-
-//- (MWMLanesPanel *)lanesPanel
-//{
-//  if (!_lanesPanel)
-//    _lanesPanel = [[MWMLanesPanel alloc] initWithParentView:IPAD ? self.navigationDashboard : self.ownerView];
-//  return _lanesPanel;
-//}
-
-- (MWMNextTurnPanel *)nextTurnPanel
-{
-  if (!_nextTurnPanel)
-    _nextTurnPanel = [MWMNextTurnPanel turnPanelWithOwnerView:IPAD ? self.navigationDashboard : self.ownerView];
-  return _nextTurnPanel;
-}
-
-- (void)setState:(MWMNavigationDashboardState)state
-{
-  if (_state == state && state != MWMNavigationDashboardStatePlanning)
-    return;
-  switch (state)
-  {
-    case MWMNavigationDashboardStateHidden:
-      [self hideState];
-      break;
-    case MWMNavigationDashboardStatePlanning:
-      [self showStatePlanning];
-      break;
-    case MWMNavigationDashboardStateError:
-      NSAssert(_state == MWMNavigationDashboardStatePlanning, @"Invalid state change (error)");
-      [self handleError];
-      break;
-    case MWMNavigationDashboardStateReady:
-      NSAssert(_state == MWMNavigationDashboardStatePlanning, @"Invalid state change (ready)");
-      [self showStateReady];
-      break;
-    case MWMNavigationDashboardStateNavigation:
-      [self showStateNavigation];
-      break;
-  }
-  _state = state;
-  [self.delegate updateStatusBarStyle];
-}
-
-- (void)setTopBound:(CGFloat)topBound
-{
-  _topBound = self.routePreviewLandscape.topBound = self.routePreviewPortrait.topBound =
-  self.navigationDashboardLandscape.topBound = self.navigationDashboardPortrait.topBound = topBound;
-  [self.drawer invalidateTopBounds:self.helperPanels topView:self.navigationDashboard];
-}
-
-- (void)setLeftBound:(CGFloat)leftBound
-{
-  _leftBound = self.routePreviewLandscape.leftBound = self.routePreviewPortrait.leftBound =
-  self.navigationDashboardLandscape.leftBound = self.navigationDashboardPortrait.leftBound = leftBound;
-}
-
-- (CGFloat)height
-{
-  switch (self.state)
-  {
-    case MWMNavigationDashboardStateHidden:
-      return 0.0;
-    case MWMNavigationDashboardStatePlanning:
-    case MWMNavigationDashboardStateReady:
-    case MWMNavigationDashboardStateError:
-      return self.routePreview.visibleHeight;
-    case MWMNavigationDashboardStateNavigation:
-      return self.navigationDashboard.visibleHeight;
-  }
-}
-
-#pragma mark - LocationObserver
-
-- (void)onLocationUpdate:(const location::GpsInfo &)info
-{
-// We don't need information about location update in this class,
-// but in LocationObserver protocol this method is required
-// since we don't want runtime overhead for introspection.
-}
-
-- (void)onCompassUpdate:(location::CompassInfo const &)info
-{
-  auto & f = GetFramework();
-  if (f.GetRouter() != routing::RouterType::Pedestrian)
-    return;
-
-  CLLocation * location = [MapsAppDelegate theApp].m_locationManager.lastLocation;
-  if (!location)
-    return;
-
-  location::FollowingInfo res;
-  f.GetRouteFollowingInfo(res);
-  if (!res.IsValid())
-    return;
-
-  CGFloat const angle = ang::AngleTo(ToMercator(location.coordinate),
-                                     ToMercator(res.m_pedestrianDirectionPos)) + info.m_bearing;
-  CGAffineTransform const transform (CGAffineTransformMakeRotation(M_PI_2 - angle));
-  self.navigationDashboardPortrait.direction.transform = transform;
-  self.navigationDashboardLandscape.direction.transform = transform;
+  [_navigationInfoView setMapSearch];
 }
 
 @end

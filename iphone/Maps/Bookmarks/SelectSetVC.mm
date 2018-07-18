@@ -1,59 +1,49 @@
-
 #import "SelectSetVC.h"
-#import "AddSetVC.h"
-#import "MWMPlacePageViewManager.h"
-#import "MWMPlacePageEntity.h"
+#import "SwiftBridge.h"
 #import "UIViewController+Navigation.h"
 
 #include "Framework.h"
 
-@interface SelectSetVC () <AddSetVCDelegate>
+@interface SelectSetVC ()
+{
+  kml::MarkGroupId m_categoryId;
+}
 
-@property (weak, nonatomic) MWMPlacePageViewManager * manager;
+@property (copy, nonatomic) NSString * category;
+@property (copy, nonatomic) MWMGroupIDCollection groupIds;
+@property (weak, nonatomic) id<MWMSelectSetDelegate> delegate;
 
 @end
 
 @implementation SelectSetVC
 
-- (instancetype)initWithPlacePageManager:(MWMPlacePageViewManager *)manager
+- (instancetype)initWithCategory:(NSString *)category
+                      categoryId:(kml::MarkGroupId)categoryId
+                        delegate:(id<MWMSelectSetDelegate>)delegate
 {
   self = [super initWithStyle:UITableViewStyleGrouped];
   if (self)
   {
-    self.manager = manager;
-    self.title = L(@"bookmark_sets");
+    _category = category;
+    m_categoryId = categoryId;
+    _delegate = delegate;
   }
   return self;
 }
 
-- (void)viewWillAppear:(BOOL)animated
+- (void)viewDidLoad
 {
-  [super viewWillAppear:animated];
-  if (!self.iPadOwnerNavigationController)
-    return;
-
-  [self.iPadOwnerNavigationController setNavigationBarHidden:NO];
-  [(UIViewController *)self showBackButton];
-  CGFloat const bottomOffset = 88.;
-  self.iPadOwnerNavigationController.view.height = self.tableView.height + bottomOffset;
+  [super viewDidLoad];
+  NSAssert(self.category, @"Category can't be nil!");
+  NSAssert(self.delegate, @"Delegate can't be nil!");
+  self.title = L(@"bookmark_sets");
+  [self reloadData];
 }
 
-- (void)popViewController
+- (void)reloadData
 {
-  if (self.iPadOwnerNavigationController)
-    [self.iPadOwnerNavigationController setNavigationBarHidden:YES];
-
-  [self.navigationController popViewControllerAnimated:YES];
-}
-
-- (void)backTap
-{
-  [self popViewController];
-}
-
-- (BOOL)shouldAutorotateToInterfaceOrientation:(UIInterfaceOrientation)interfaceOrientation
-{
-  return YES;
+  self.groupIds = [MWMBookmarksManager groupsIdList];
+  [self.tableView reloadData];
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
@@ -67,16 +57,13 @@
   if (section == 0)
     return 1;
 
-  return GetFramework().GetBmCategoriesCount();
+  return self.groupIds.count;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-  static NSString * kSetCellId = @"AddSetCell";
-  UITableViewCell * cell = [tableView dequeueReusableCellWithIdentifier:kSetCellId];
-  if (cell == nil)
-    cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:kSetCellId];
-  // Customize cell
+  Class cls = [UITableViewCell class];
+  auto cell = [tableView dequeueReusableCellWithCellClass:cls indexPath:indexPath];
   if (indexPath.section == 0)
   {
     cell.textLabel.text = L(@"add_new_set");
@@ -84,13 +71,12 @@
   }
   else
   {
-    BookmarkCategory * cat = GetFramework().GetBmCategory(indexPath.row);
-    if (cat)
-      cell.textLabel.text = @(cat->GetName().c_str());
+    auto const & bmManager = GetFramework().GetBookmarkManager();
+    auto const categoryId = [self.groupIds[indexPath.row] unsignedLongLongValue];
+    if (bmManager.HasBmCategory(categoryId))
+      cell.textLabel.text = @(bmManager.GetCategoryName(categoryId).c_str());
 
-    BookmarkAndCategory const bac = self.manager.entity.bac;
-
-    if (bac.first == indexPath.row)
+    if (m_categoryId == categoryId)
       cell.accessoryType = UITableViewCellAccessoryCheckmark;
     else
       cell.accessoryType = UITableViewCellAccessoryNone;
@@ -98,24 +84,12 @@
   return cell;
 }
 
-- (void)addSetVC:(AddSetVC *)vc didAddSetWithIndex:(int)setIndex
+- (void)moveBookmarkToSetWithCategoryId:(kml::MarkGroupId)categoryId
 {
-  [self moveBookmarkToSetWithIndex:setIndex];
-
-  [self.tableView reloadData];
-  [self.manager reloadBookmark];
-}
-
-- (void)moveBookmarkToSetWithIndex:(int)setIndex
-{
-  MWMPlacePageEntity * entity = self.manager.entity;
-  BookmarkAndCategory bac;
-  bac.second = static_cast<int>(GetFramework().MoveBookmark(entity.bac.second, entity.bac.first, setIndex));
-  bac.first = setIndex;
-  entity.bac = bac;
-
-  BookmarkCategory const * category = GetFramework().GetBookmarkManager().GetBmCategory(bac.first);
-  entity.bookmarkCategory = @(category->GetName().c_str());
+  m_categoryId = categoryId;
+  self.category = @(GetFramework().GetBookmarkManager().GetCategoryName(categoryId).c_str());
+  [self reloadData];
+  [self.delegate didSelectCategory:self.category withCategoryId:categoryId];
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath
@@ -123,17 +97,25 @@
   [self.tableView deselectRowAtIndexPath:indexPath animated:YES];
   if (indexPath.section == 0)
   {
-    AddSetVC * asVC = [[AddSetVC alloc] init];
-    asVC.delegate = self;
-    if (IPAD)
-      asVC.preferredContentSize = self.preferredContentSize;
-    [self.navigationController pushViewController:asVC animated:YES];
+    [self.alertController presentCreateBookmarkCategoryAlertWithMaxCharacterNum:60
+                                                          minCharacterNum:0
+                                                            isNewCategory:YES
+                                                                 callback:^BOOL (NSString * name)
+     {
+       if (![MWMBookmarksManager checkCategoryName:name])
+         return false;
+
+       auto const id = [MWMBookmarksManager createCategoryWithName:name];
+       [self moveBookmarkToSetWithCategoryId:id];
+       return true;
+    }];
   }
   else
   {
-    [self moveBookmarkToSetWithIndex:static_cast<int>(indexPath.row)];
-    [self.manager reloadBookmark];
-    [self popViewController];
+    auto const categoryId = [self.groupIds[indexPath.row] unsignedLongLongValue];;
+    [self moveBookmarkToSetWithCategoryId:categoryId];
+    [self.delegate didSelectCategory:self.category withCategoryId:categoryId];
+    [self backTap];
   }
 }
 

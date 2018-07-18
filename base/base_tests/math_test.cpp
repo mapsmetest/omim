@@ -1,6 +1,8 @@
 #include "testing/testing.hpp"
+
 #include "base/math.hpp"
-#include "std/limits.hpp"
+
+#include <limits>
 
 #include <boost/math/special_functions/next.hpp>
 
@@ -9,12 +11,6 @@ UNIT_TEST(id)
     TEST_EQUAL(my::id(true), true, ());
     TEST_EQUAL(my::id(1), 1.0, ());
     TEST_EQUAL(my::id(1.0), 1, ());
-}
-
-UNIT_TEST(sq)
-{
-    TEST_EQUAL(my::sq(-1.5), 2.25, ());
-    TEST_EQUAL(my::sq(3), 9, ());
 }
 
 UNIT_TEST(SizeAligned)
@@ -45,8 +41,8 @@ UNIT_TEST(AlmostEqualULPs_Smoke)
   TEST_ALMOST_EQUAL_ULPS(3.0, 3.0, ());
   TEST_ALMOST_EQUAL_ULPS(+0.0, -0.0, ());
 
-  double const eps = numeric_limits<double>::epsilon();
-  double const dmax = numeric_limits<double>::max();
+  double const eps = std::numeric_limits<double>::epsilon();
+  double const dmax = std::numeric_limits<double>::max();
 
   TEST_ALMOST_EQUAL_ULPS(1.0 + eps, 1.0, ());
   TEST_ALMOST_EQUAL_ULPS(1.0 - eps, 1.0, ());
@@ -157,4 +153,26 @@ UNIT_TEST(GCD_Test)
   TEST_EQUAL(my::GCD(7, 3), 1, ());
   TEST_EQUAL(my::GCD(8, 3), 1, ());
   TEST_EQUAL(my::GCD(9, 3), 3, ());
+}
+
+UNIT_TEST(LCM_Test)
+{
+  TEST_EQUAL(my::LCM(6, 3), 6, ());
+  TEST_EQUAL(my::LCM(14, 7), 14, ());
+  TEST_EQUAL(my::LCM(100, 100), 100, ());
+  TEST_EQUAL(my::LCM(7, 3), 21, ());
+  TEST_EQUAL(my::LCM(8, 3), 24, ());
+  TEST_EQUAL(my::LCM(9, 3), 9, ());
+}
+
+UNIT_TEST(Sign_test)
+{
+  TEST_EQUAL(1, my::Sign(1), ());
+  TEST_EQUAL(1, my::Sign(10.4), ());
+
+  TEST_EQUAL(0, my::Sign(0), ());
+  TEST_EQUAL(0, my::Sign(0.0), ());
+
+  TEST_EQUAL(-1, my::Sign(-11), ());
+  TEST_EQUAL(-1, my::Sign(-10.4), ());
 }

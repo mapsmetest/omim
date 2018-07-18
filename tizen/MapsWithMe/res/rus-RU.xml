@@ -22,7 +22,7 @@
 	<!-- Settings/Downloader - No internet connection dialog title -->
 	<text id="IDS_NO_INTERNET_CONNECTION_DETECTED">Отсутствует подключение к интернету</text>
 	<!-- Settings/Downloader - 3G download warning dialog title -->
-	<text id="IDS_NO_WIFI_ASK_CELLULAR_DOWNLOAD">Нет WiFi соединения. Вы хотите загрузить %s через сотового оператора (GPRS, EDGE или 3G)?</text>
+	<text id="IDS_NO_WIFI_ASK_CELLULAR_DOWNLOAD">Нет WiFi соединения. Вы хотите загрузить %s через сотового оператора (GPRS, EDGE, 3G или LTE)?</text>
 	<!-- Settings/Downloader - No internet connection dialog message -->
 	<text id="IDS_USE_WIFI_RECOMMENDATION_TEXT">Мы рекомендуем загружать большие страны через WiFi</text>
 	<text id="IDS_DOWNLOAD">Загрузить</text>
@@ -93,8 +93,8 @@
 	<text id="IDS_SHARE">Поделиться</text>
 	<!-- iOS share by Message button text (including SMS) -->
 	<text id="IDS_MESSAGE">Сообщение</text>
-	<!-- Share by email button text -->
-	<text id="IDS_EMAIL">E-Mail</text>
+	<!-- Share by email button text, also used in editor. -->
+	<text id="IDS_EMAIL">E-mail</text>
 	<!-- Copy Link -->
 	<text id="IDS_COPY_LINK">Скопировать ссылку</text>
 	<!-- Used for bookmark editing -->
@@ -104,7 +104,6 @@
 	<!-- Confirmation in downloading countries dialog -->
 	<text id="IDS_ARE_YOU_SURE">Вы уверены, что хотите продолжить?</text>
 	<text id="IDS_SHARE_MY_LOCATION">Поделиться местоположением</text>
-	<text id="IDS_BECOME_A_PRO">Загрузить PRO</text>
 	<text id="IDS_PREF_ZOOM_TITLE">Кнопки масштаба</text>
 	<text id="IDS_PREF_ZOOM_SUMMARY">Показать на карте</text>
 	<!-- Show on first launch. -->
@@ -149,7 +148,7 @@
 	<text id="IDS_DOWNLOADER_DELETE_ROUTING">Удалить маршруты</text>
 	<!-- Context menu item for downloader. -->
 	<text id="IDS_DOWNLOADER_DOWNLOAD_MAP">Загрузить карту</text>
-	<!-- Button for routing PP. -->
+	<!-- Button for routing. -->
 	<text id="IDS_ROUTING_GO">Поехали!</text>
 	<!-- Item status in downloader. -->
 	<text id="IDS_DOWNLOADER_RETRY">Повторите попытку</text>

@@ -8,6 +8,7 @@
 #include "base/stl_add.hpp"
 
 #include "std/iterator.hpp"
+#include "std/limits.hpp"
 
 
 template <typename IsVisibleF>
@@ -91,7 +92,7 @@ template <typename IterT> bool IsPolygonCCW(IterT beg, IterT end)
   IterT iNext = NextIterInCycle(iRes, beg, end);
   cp =  m2::robust::OrientedS(*iPrev, *iRes, *iNext);
 
-  ASSERT_NOT_EQUAL ( cp, 0.0, (*iPrev, *iRes, *iNext) );
+  ASSERT_NOT_EQUAL(cp, 0.0, (*iPrev, *iRes, *iNext));
   return (cp > 0.0);
 }
 
@@ -109,7 +110,7 @@ bool IsDiagonalVisible(IterT beg, IterT end, IterT i0, IterT i1)
   if (prev == i1 || next == i1)
     return true;
 
-  if (!m2::IsSegmentInCone(*i0, *i1, *prev, *next))
+  if (!m2::robust::IsSegmentInCone(*i0, *i1, *prev, *next))
     return false;
 
   for (IterT j0 = beg, j1 = PrevIterInCycle(beg, beg, end); j0 != end; j1 = j0++)

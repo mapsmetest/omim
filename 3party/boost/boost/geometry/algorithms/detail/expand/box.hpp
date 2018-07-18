@@ -5,29 +5,33 @@
 // Copyright (c) 2009-2015 Mateusz Loskot, London, UK.
 // Copyright (c) 2014-2015 Samuel Debionne, Grenoble, France.
 
-// This file was modified by Oracle on 2015.
-// Modifications copyright (c) 2015, Oracle and/or its affiliates.
+// This file was modified by Oracle on 2015, 2016.
+// Modifications copyright (c) 2015-2016, Oracle and/or its affiliates.
 
+// Contributed and/or modified by Vissarion Fysikopoulos, on behalf of Oracle
 // Contributed and/or modified by Menelaos Karavelas, on behalf of Oracle
 
-// Parts of Boost.Geometry are redesigned from Geodan's Geographic Library
-// (geolib/GGL), copyright (c) 1995-2010 Geodan, Amsterdam, the Netherlands.
-
-// Use, modification and distribution is subject to the Boost Software License,
-// Version 1.0. (See accompanying file LICENSE_1_0.txt or copy at
+// Distributed under the Boost Software License, Version 1.0.
+// (See accompanying file LICENSE_1_0.txt or copy at
 // http://www.boost.org/LICENSE_1_0.txt)
 
 #ifndef BOOST_GEOMETRY_ALGORITHMS_DETAIL_EXPAND_BOX_HPP
 #define BOOST_GEOMETRY_ALGORITHMS_DETAIL_EXPAND_BOX_HPP
 
+#include <cstddef>
 #include <algorithm>
 
-#include <boost/geometry/core/access.hpp>
+#include <boost/mpl/assert.hpp>
+#include <boost/type_traits/is_same.hpp>
+
+#include <boost/geometry/core/coordinate_dimension.hpp>
 #include <boost/geometry/core/tags.hpp>
 
 #include <boost/geometry/algorithms/detail/envelope/box.hpp>
 #include <boost/geometry/algorithms/detail/envelope/range_of_boxes.hpp>
+
 #include <boost/geometry/algorithms/detail/expand/indexed.hpp>
+
 #include <boost/geometry/algorithms/dispatch/expand.hpp>
 
 
@@ -41,16 +45,18 @@ namespace detail { namespace expand
 
 struct box_on_spheroid
 {
-    template <typename BoxOut, typename BoxIn>
-    static inline void apply(BoxOut& box_out, BoxIn const& box_in)
+    template <typename BoxOut, typename BoxIn, typename Strategy>
+    static inline void apply(BoxOut& box_out,
+                             BoxIn const& box_in,
+                             Strategy const& strategy)
     {
         // normalize both boxes and convert box-in to be of type of box-out
         BoxOut mbrs[2];
-        detail::envelope::envelope_box_on_spheroid::apply(box_in, mbrs[0]);
-        detail::envelope::envelope_box_on_spheroid::apply(box_out, mbrs[1]);
+        detail::envelope::envelope_box_on_spheroid::apply(box_in, mbrs[0], strategy);
+        detail::envelope::envelope_box_on_spheroid::apply(box_out, mbrs[1], strategy);
 
         // compute the envelope of the two boxes
-        detail::envelope::envelope_range_of_boxes::apply(mbrs, box_out);
+        detail::envelope::envelope_range_of_boxes::apply(mbrs, box_out, strategy);
     }
 };
 
@@ -72,10 +78,19 @@ template
 >
 struct expand
     <
-        BoxOut, BoxIn, StrategyLess, StrategyGreater,
-        box_tag, box_tag, CSTagOut, CSTag
-    > : detail::expand::expand_indexed<StrategyLess, StrategyGreater>
-{};
+        BoxOut, BoxIn,
+        StrategyLess, StrategyGreater,
+        box_tag, box_tag,
+        CSTagOut, CSTag
+    > : detail::expand::expand_indexed
+        <
+            0, dimension<BoxIn>::value, StrategyLess, StrategyGreater
+        >
+{
+    BOOST_MPL_ASSERT_MSG((boost::is_same<CSTagOut, CSTag>::value),
+                         COORDINATE_SYSTEMS_MUST_BE_THE_SAME,
+                         (types<CSTagOut, CSTag>()));
+};
 
 template
 <
@@ -84,8 +99,10 @@ template
 >
 struct expand
     <
-        BoxOut, BoxIn, StrategyLess, StrategyGreater,
-        box_tag, box_tag, spherical_equatorial_tag, spherical_equatorial_tag
+        BoxOut, BoxIn,
+        StrategyLess, StrategyGreater,
+        box_tag, box_tag,
+        spherical_equatorial_tag, spherical_equatorial_tag
     > : detail::expand::box_on_spheroid
 {};
 
@@ -96,8 +113,10 @@ template
 >
 struct expand
     <
-        BoxOut, BoxIn, StrategyLess, StrategyGreater,
-        box_tag, box_tag, geographic_tag, geographic_tag
+        BoxOut, BoxIn,
+        StrategyLess, StrategyGreater,
+        box_tag, box_tag,
+        geographic_tag, geographic_tag
     > : detail::expand::box_on_spheroid
 {};
 

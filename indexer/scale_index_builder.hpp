@@ -1,6 +1,7 @@
 #pragma once
 #include "indexer/cell_id.hpp"
 #include "indexer/data_header.hpp"
+#include "indexer/displacement_manager.hpp"
 #include "indexer/feature.hpp"
 #include "indexer/feature_covering.hpp"
 #include "indexer/feature_visibility.hpp"
@@ -26,75 +27,19 @@
 
 namespace covering
 {
-class CellFeaturePair
-{
-public:
-  CellFeaturePair() = default;
-  CellFeaturePair(uint64_t cell, uint32_t feature)
-    : m_CellLo(UINT64_LO(cell)), m_CellHi(UINT64_HI(cell)), m_Feature(feature) {}
-
-  bool operator< (CellFeaturePair const & rhs) const
-  {
-    if (m_CellHi != rhs.m_CellHi)
-      return m_CellHi < rhs.m_CellHi;
-    if (m_CellLo != rhs.m_CellLo)
-      return m_CellLo < rhs.m_CellLo;
-    return m_Feature < rhs.m_Feature;
-  }
-
-  uint64_t GetCell() const { return UINT64_FROM_UINT32(m_CellHi, m_CellLo); }
-  uint32_t GetFeature() const { return m_Feature; }
-
-private:
-  uint32_t m_CellLo;
-  uint32_t m_CellHi;
-  uint32_t m_Feature;
-};
-static_assert(sizeof(CellFeaturePair) == 12, "");
-#ifndef OMIM_OS_LINUX
-static_assert(is_trivially_copyable<CellFeaturePair>::value, "");
-#endif
-
-class CellFeatureBucketTuple
-{
-public:
-  CellFeatureBucketTuple() = default;
-  CellFeatureBucketTuple(CellFeaturePair const & p, uint32_t bucket) : m_pair(p), m_bucket(bucket)
-  {
-  }
-
-  bool operator<(CellFeatureBucketTuple const & rhs) const
-  {
-    if (m_bucket != rhs.m_bucket)
-      return m_bucket < rhs.m_bucket;
-    return m_pair < rhs.m_pair;
-  }
-
-  CellFeaturePair const & GetCellFeaturePair() const { return m_pair; }
-  uint32_t GetBucket() const { return m_bucket; }
-
-private:
-  CellFeaturePair m_pair;
-  uint32_t m_bucket;
-};
-static_assert(sizeof(CellFeatureBucketTuple) == 16, "");
-#ifndef OMIM_OS_LINUX
-static_assert(is_trivially_copyable<CellFeatureBucketTuple>::value, "");
-#endif
-
-template <class TSorter>
+template <class TDisplacementManager>
 class FeatureCoverer
 {
 public:
-  FeatureCoverer(feature::DataHeader const & header, TSorter & sorter,
+  FeatureCoverer(feature::DataHeader const & header, TDisplacementManager & manager,
                  vector<uint32_t> & featuresInBucket, vector<uint32_t> & cellsInBucket)
-      : m_header(header),
-        m_scalesIdx(0),
-        m_bucketsCount(header.GetLastScale() + 1),
-        m_sorter(sorter),
-        m_codingDepth(covering::GetCodingDepth(header.GetLastScale())),
-        m_featuresInBucket(featuresInBucket),
-        m_cellsInBucket(cellsInBucket)
+    : m_header(header)
+    , m_scalesIdx(0)
+    , m_bucketsCount(header.GetLastScale() + 1)
+    , m_displacement(manager)
+    , m_codingDepth(covering::GetCodingDepth<RectId::DEPTH_LEVELS>(header.GetLastScale()))
+    , m_featuresInBucket(featuresInBucket)
+    , m_cellsInBucket(cellsInBucket)
   {
     m_featuresInBucket.resize(m_bucketsCount);
     m_cellsInBucket.resize(m_bucketsCount);
@@ -104,7 +49,8 @@ public:
   void operator() (TFeature const & ft, uint32_t index) const
   {
     m_scalesIdx = 0;
-    uint32_t minScaleClassif = feature::GetMinDrawableScaleClassifOnly(ft);
+    uint32_t const minScaleClassif = min(scales::GetUpperScale(),
+                                         feature::GetMinDrawableScaleClassifOnly(ft));
     // The classificator won't allow this feature to be drawable for smaller
     // scales so the first buckets can be safely skipped.
     // todo(@pimenov) Parallelizing this loop may be helpful.
@@ -114,14 +60,13 @@ public:
       // This is not immediately obvious and in fact there was an idea to map
       // a bucket to a contiguous range of scales.
       // todo(@pimenov): We probably should remove scale_index.hpp altogether.
-      if (!FeatureShouldBeIndexed(ft, bucket, bucket == minScaleClassif /* needReset */))
+      if (!FeatureShouldBeIndexed(ft, static_cast<int>(bucket), bucket == minScaleClassif /* needReset */))
       {
         continue;
       }
 
       vector<int64_t> const cells = covering::CoverFeature(ft, m_codingDepth, 250);
-      for (int64_t cell : cells)
-        m_sorter.Add(CellFeatureBucketTuple(CellFeaturePair(cell, index), bucket));
+      m_displacement.Add(cells, bucket, ft, index);
 
       m_featuresInBucket[bucket] += 1;
       m_cellsInBucket[bucket] += cells.size();
@@ -137,7 +82,7 @@ private:
   //   -- it is allowed by the classificator.
   // If the feature is invisible at all scales, do not index it.
   template <class TFeature>
-  bool FeatureShouldBeIndexed(TFeature const & ft, uint32_t scale, bool needReset) const
+  bool FeatureShouldBeIndexed(TFeature const & ft, int scale, bool needReset) const
   {
     while (m_scalesIdx < m_header.GetScalesCount() && m_header.GetScale(m_scalesIdx) < scale)
     {
@@ -169,27 +114,10 @@ private:
   mutable size_t m_scalesIdx;
 
   uint32_t m_bucketsCount;
-  TSorter & m_sorter;
+  TDisplacementManager & m_displacement;
   int m_codingDepth;
   vector<uint32_t> & m_featuresInBucket;
   vector<uint32_t> & m_cellsInBucket;
-};
-
-template <class SinkT>
-class CellFeaturePairSinkAdapter
-{
-public:
-  explicit CellFeaturePairSinkAdapter(SinkT & sink) : m_Sink(sink) {}
-
-  void operator() (int64_t cellId, uint64_t value) const
-  {
-    // uint64_t -> uint32_t : assume that feature dat file not more than 4Gb
-    CellFeaturePair cellFeaturePair(cellId, static_cast<uint32_t>(value));
-    m_Sink.Write(&cellFeaturePair, sizeof(cellFeaturePair));
-  }
-
-private:
-  SinkT & m_Sink;
 };
 
 template <class TFeaturesVector, class TWriter>
@@ -208,11 +136,18 @@ void IndexScales(feature::DataHeader const & header, TFeaturesVector const & fea
     FileWriter cellsToFeaturesAllBucketsWriter(cellsToFeatureAllBucketsFile);
 
     using TSorter = FileSorter<CellFeatureBucketTuple, WriterFunctor<FileWriter>>;
+    using TDisplacementManager = DisplacementManager<TSorter>;
     WriterFunctor<FileWriter> out(cellsToFeaturesAllBucketsWriter);
     TSorter sorter(1024 * 1024 /* bufferBytes */, tmpFilePrefix + CELL2FEATURE_TMP_EXT, out);
+    // Heuristically rearrange and filter single-point features to simplify
+    // the runtime decision of whether we should draw a feature
+    // or sacrifice it for the sake of more important ones.
+    TDisplacementManager manager(sorter);
     vector<uint32_t> featuresInBucket(bucketsCount);
     vector<uint32_t> cellsInBucket(bucketsCount);
-    features.ForEach(FeatureCoverer<TSorter>(header, sorter, featuresInBucket, cellsInBucket));
+    features.ForEach(
+        FeatureCoverer<TDisplacementManager>(header, manager, featuresInBucket, cellsInBucket));
+    manager.Displace();
     sorter.SortAndFinish();
 
     for (uint32_t bucket = 0; bucket < bucketsCount; ++bucket)
@@ -248,7 +183,8 @@ void IndexScales(feature::DataHeader const & header, TFeaturesVector const & fea
 
     {
       FileReader reader(cellsToFeatureFile);
-      DDVector<CellFeaturePair, FileReader, uint64_t> cellsToFeatures(reader);
+      DDVector<CellFeatureBucketTuple::CellFeaturePair, FileReader, uint64_t> cellsToFeatures(
+          reader);
       SubWriter<TWriter> subWriter(writer);
       LOG(LINFO, ("Building interval index for bucket:", bucket));
       BuildIntervalIndex(cellsToFeatures.begin(), cellsToFeatures.end(), subWriter,

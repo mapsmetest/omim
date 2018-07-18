@@ -1,30 +1,33 @@
 # C++ Style Guide
 
-In general, [Google's coding standard](http://google-styleguide.googlecode.com/svn/trunk/cppguide.xml) is used, and we strongly encourage to read it.
+In general, [Google's coding standard](https://google.github.io/styleguide/cppguide.html) is used, and we strongly encourage to read it.
 
 Below are our specific (but not all!) exceptions to the Google's coding standard:
 
+- All code should conform to the C++14 standard (not C++17 or higher).
 - We use `.cpp` and `.hpp` files, not `.cc` and `.h` (`.c` and `.h` are used for C code), in UTF-8 encoding.
 - File names are lowercase with underscores, like `file_reader.cpp`.
 - We use `#pragma once` instead of the `#define` Guard in header files.
-- We don't include system, std and boost headers directly, use `#include "std/<wrapper.hpp>"`.
+- Includes are sorted and grouped by directory, there should be newlines between different directories.
+- Order of directories in includes: "current_dir/current_file.hpp", includes from other dirs sorted by dependencies (e.g. indexer, then coding, then base), "defines.hpp", C++ standard library headers, boost headers, 3party.
 - We ARE using C++ exceptions.
 - We are using all features of C++11 (the only known exception is thread_local which is not fully supported on all platforms).
-- We don't use boost libraries which require linking (and prefer C++11 types over their boost counterparts).
+- We try to limit the usage of boost libraries which require linking (and prefer C++11 types over their boost counterparts).
 
 Naming and formatting
 
 - We ALWAYS use two spaces indent and don't use tabs.
-- We don't have hardcoded line width, but keep it reasonable to fit on the screen.
+- We don't have strict limits on line width, but keep it reasonable to fit on the screen. The advised width is that written in the .clang-format file (currently 100).
 - Doxygen-style comments can be used.
 - Underscores are allowed only in prefixes for member variables and namespace names, like `int m_countriesCount; namespace utf_parser`.
-- Don't specify `std::` and `boost::` prefixes (headers in std/ folder already have `using std::string`).
 - Use right-to-left order for variables/params: `string const & s` (reference to the const string).
 - In one line `if`, `for`, `while` we do not use brackets. If one line `for` or `while` is combined with one line `if`, do use brackets for cycle.
 - Space after the keyword in conditions and loops. Space after `;` in `for` loop.
 - Space between binary operators: `x = y * y + z * z`.
 - Space after double dash.
-- Compile-time constants must be named in camelCase, starting with a lower-case `k`, e.g. `kCompileTimeConstant`.
+- We use `using` keyword instead of `typedef`.
+- We do not use the Systems Hungarian Notation: do not add the "p" suffix to your pointer variable names and the "T" prefix or suffix to your type names.
+- Compile-time constants must be named in camelCase, starting with a lower-case `k`, e.g. `kCompileTimeConstant` and marked as `constexpr` when possible.
 - Values of enum classes must be named in CamelCase, e.g. `enum class Color { Red, Green, LightBlue };`.
 - Macros and C-style enums must be named in UPPER_CASE, and enum values must be prefixed with a capitalized enum name.
 
@@ -47,9 +50,9 @@ To automatically format a file, install `clang-format` and run:
 
 #include "std/math.hpp"
 
-uint16_t const kBufferSize = 255;
+uint16_t constexpr kBufferSize = 255;
 
-// C-style enum. Do not use these.
+// C-style enums are ALL_CAPS. But remember that C++11 enum classes are preferred.
 enum Type
 {
   TYPE_INTEGER,
@@ -57,37 +60,42 @@ enum Type
   TYPE_STRING
 };
 
-typedef double TMyTypeStartsWithCapitalTLetter;
+using TMyTypeStartsWithCapitalTLetter = double;
 
 class ComplexClass
 {
 public:
   Complex(double rePart, double imPart) : m_re(rePart), m_im(imPart) {}
-  double Modulus() const { return sqrt(m_re * m_re + m_im * m_im); }
+
+  double Modulus() const
+  {
+    double const rere = m_re * m_re;
+    double const imim = m_im * m_im;
+    return sqrt(rere + imim);
+  }
+
+  double OneLineMethod() const { return m_re; }
 
 private:
-  // We use m_ prefix for member variables
+  // We use the "m_" prefix for member variables.
   double m_re;
   double m_im;
 };
 
 namespace
 {
-
 void CamelCaseFunctionName(int lowerCamelCaseVar)
 {
   static int counter = 0;
   counter += lowerCamelCaseVar;
 }
-
-} // namespace
+}  // namespace
 
 namespace lower_case
 {
-
-template <class TTemplateTypeStartsWithCapitalTLetter>
+template <typename TypenameWithoutAffixes>
 void SomeFoo(int a, int b,
-             TTemplateTypeStartsWithCapitalTLetter /* we avoid compilation warnings */)
+             TypenameWithoutAffixes /* We avoid compilation warnings. */)
 {
   for (int i = 0; i < a; ++i)
   {
@@ -99,15 +107,14 @@ void SomeFoo(int a, int b,
     {
       Bar(i);
       Bar(b);
-      // Commented out call
+      // Commented out the call.
       // Bar(c);
     }
   }
 }
+}  // namespace lower_case
 
-} // namespace lower_case
-
-// Switch formatting
+// Switch formatting.
 int Foo(int a)
 {
   switch (a)
@@ -115,23 +122,20 @@ int Foo(int a)
   case 1:
     Bar(1);
     break;
-
   case 2:
   {
     Bar(2);
     break;
   }
-
   case 3:
   default:
     Bar(3);
     break;
   }
-
   return 0;
 }
 
-// if, for, while formatting
+// Loops formatting.
 
 if (condition)
   foo();
@@ -155,8 +159,7 @@ while (true)
     break;
 }
 
-// Space after the keyword
-
+// Space after the keyword.
 if (condition)
 {
 }
@@ -173,7 +176,7 @@ switch (i)
 {
 }
 
-// Space between operators, and don't use space between unary operator and expression
+// Space between operators, and don't use space between unary operator and expression.
 x = 0;
 x = -5;
 ++x;
@@ -185,20 +188,20 @@ if (x && !y)
 v = w * x + y / z;
 v = w * (x + z);
 
-// space after double dash
+// Space after double dash. And full sentences in comments.
 ```
 
 ## Tips and Hints
 
-- If you see outdated code which can be improved - DO IT NOW (but in the separate pull request)! Make this awesome world even more better! 
-- Your code should work at least on [mac|win|linux|android][x86|x86_64], [ios|android][armv7|arm64] architectures
-- Your code should compile well with gcc 4.8+ and clang 3.5+
+- If you see outdated code which can be improved, DO IT NOW (but in a separate pull request)!
+- Your code should work at least on [mac|linux|android][x86|x86_64], [ios|android][x86|armv7|arm64] architectures
+- Your code should compile with gcc 6.0+ and clang 5.0+
 - Try to avoid using any new 3party library if it is not fully tested and supported on all our platforms
-- Cover your code with unit tests! See examples for existing libraries
+- Cover your code with unit tests. See examples for existing libraries
 - Check Base and Coding libraries for most of the basic functions
 - Ask your team if you have any questions
 - Use dev@maps.me mailing list to ask all developers and bugs@maps.me mailing list to post bugs
-- Release builds contain debugging information (for profiling), production builds are not
+- Release builds contain debugging information (for profiling), production builds do not
 - If you don't have enough time to make it right, leave a `// TODO(DeveloperName): need to fix it` comment
 
 ### Some useful macros:

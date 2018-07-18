@@ -20,7 +20,7 @@
 	<!-- Settings/Downloader - No internet connection dialog title -->
 	<text id="IDS_NO_INTERNET_CONNECTION_DETECTED">Nie wykryto połączenia z Internetem</text>
 	<!-- Settings/Downloader - 3G download warning dialog title -->
-	<text id="IDS_NO_WIFI_ASK_CELLULAR_DOWNLOAD">Nie wykryto połączenia z siecią WiFi. Czy chciałbyś skorzystać z trybu sieci danych (GPRS, EDGE lub 3G), aby pobrać %s?</text>
+	<text id="IDS_NO_WIFI_ASK_CELLULAR_DOWNLOAD">Nie wykryto połączenia z siecią WiFi. Czy chciałbyś skorzystać z trybu sieci danych (GPRS, EDGE, 3G lub LTE), aby pobrać %s?</text>
 	<!-- Settings/Downloader - No internet connection dialog message -->
 	<text id="IDS_USE_WIFI_RECOMMENDATION_TEXT">Zalecamy korzystanie z WiFi przy pobieraniu dużych map</text>
 	<text id="IDS_DOWNLOAD">Pobierz</text>
@@ -91,7 +91,7 @@
 	<text id="IDS_SHARE">Udostępnij</text>
 	<!-- iOS share by Message button text (including SMS) -->
 	<text id="IDS_MESSAGE">Wiadomość</text>
-	<!-- Share by email button text -->
+	<!-- Share by email button text, also used in editor. -->
 	<text id="IDS_EMAIL">E-mail</text>
 	<!-- Copy Link -->
 	<text id="IDS_COPY_LINK">Kopiuj link</text>
@@ -102,7 +102,6 @@
 	<!-- Confirmation in downloading countries dialog -->
 	<text id="IDS_ARE_YOU_SURE">Czy na pewno kontynuować?</text>
 	<text id="IDS_SHARE_MY_LOCATION">Udostępnij moją lokalizację</text>
-	<text id="IDS_BECOME_A_PRO">Uaktualnij</text>
 	<text id="IDS_PREF_ZOOM_TITLE">Przyciski powiększania</text>
 	<text id="IDS_PREF_ZOOM_SUMMARY">Wyświetl na ekranie</text>
 	<!-- Search Suggestion -->
@@ -141,7 +140,7 @@
 	<text id="IDS_DOWNLOADER_DELETE_ROUTING">Skasuj wyznaczanie tras</text>
 	<!-- Context menu item for downloader. -->
 	<text id="IDS_DOWNLOADER_DOWNLOAD_MAP">Pobierz mapę</text>
-	<!-- Button for routing PP. -->
+	<!-- Button for routing. -->
 	<text id="IDS_ROUTING_GO">Przejdź!</text>
 	<!-- Item status in downloader. -->
 	<text id="IDS_DOWNLOADER_RETRY">Spróbuj ponownie</text>

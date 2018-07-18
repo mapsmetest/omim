@@ -1,22 +1,23 @@
-#include "../Framework.hpp"
+#include "com/mapswithme/maps/Framework.hpp"
 
+#include "platform/measurement_utils.hpp"
 #include "platform/settings.hpp"
-
 
 extern "C"
 {
   JNIEXPORT void JNICALL
   Java_com_mapswithme_maps_settings_UnitLocale_setCurrentUnits(JNIEnv * env, jobject thiz, jint units)
   {
-    Settings::Units const u = static_cast<Settings::Units>(units);
-    Settings::Set("Units", u);
+    measurement_utils::Units const u = static_cast<measurement_utils::Units>(units);
+    settings::Set(settings::kMeasurementUnits, u);
     g_framework->SetupMeasurementSystem();
   }
 
   JNIEXPORT jint JNICALL
   Java_com_mapswithme_maps_settings_UnitLocale_getCurrentUnits(JNIEnv * env, jobject thiz)
   {
-    Settings::Units u = Settings::Metric;
-    return (Settings::Get("Units", u) ? u : -1);
+    measurement_utils::Units u;
+    return static_cast<jint>(
+        settings::Get(settings::kMeasurementUnits, u) ? u : measurement_utils::Units::Metric);
   }
 }

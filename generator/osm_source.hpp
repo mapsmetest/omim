@@ -3,38 +3,70 @@
 #include "generator/generate_info.hpp"
 #include "generator/osm_element.hpp"
 
-#include "std/function.hpp"
-#include "std/iostream.hpp"
-#include "std/unique_ptr.hpp"
+#include <functional>
+#include <iostream>
+#include <memory>
+#include <sstream>
+#include <string>
+#include <vector>
 
+class FeatureBuilder1;
+class FeatureParams;
+
+namespace generator
+{
 class SourceReader
 {
   struct Deleter
   {
     bool m_needDelete;
     Deleter(bool needDelete = true) : m_needDelete(needDelete) {}
-    void operator()(istream * s) const
+    void operator()(std::istream * s) const
     {
       if (m_needDelete)
         delete s;
     }
   };
 
-  unique_ptr<istream, Deleter> m_file;
+  std::unique_ptr<std::istream, Deleter> m_file;
 
 public:
   SourceReader();
-  explicit SourceReader(string const & filename);
-  explicit SourceReader(istringstream & stream);
+  explicit SourceReader(std::string const & filename);
+  explicit SourceReader(std::istringstream & stream);
 
   uint64_t Read(char * buffer, uint64_t bufferSize);
 };
 
+// Emitter is used in OsmElement to FeatureBuilder translation process.
+class EmitterBase
+{
+public:
+  virtual ~EmitterBase() = default;
 
+  /// This method is used by OsmTranslator to pass |fb| to Emitter for further processing.
+  virtual void operator()(FeatureBuilder1 & fb) = 0;
 
-bool GenerateFeatures(feature::GenerateInfo & info);
+  virtual void EmitCityBoundary(FeatureBuilder1 const & fb, FeatureParams const & params) {}
+
+  /// Finish is used in GenerateFeatureImpl to make whatever work is needed after
+  /// all OmsElements are processed.
+  virtual bool Finish() { return true; }
+  /// Sets buckets (mwm names).
+  // TODO(syershov): Make this topic clear.
+  virtual void GetNames(std::vector<std::string> & names) const = 0;
+};
+
+std::unique_ptr<EmitterBase> MakeMainFeatureEmitter(feature::GenerateInfo const & info);
+
+using EmitterFactory = std::function<std::unique_ptr<EmitterBase>(feature::GenerateInfo const &)>;
+
+bool GenerateFeatures(feature::GenerateInfo & info,
+                      EmitterFactory factory = MakeMainFeatureEmitter);
+bool GenerateRegionFeatures(feature::GenerateInfo & info,
+                            EmitterFactory factory = MakeMainFeatureEmitter);
 bool GenerateIntermediateData(feature::GenerateInfo & info);
 
-void BuildFeaturesFromO5M(SourceReader & stream, function<void(OsmElement *)> processor);
-void BuildFeaturesFromXML(SourceReader & stream, function<void(OsmElement *)> processor);
-
+void ProcessOsmElementsFromO5M(SourceReader & stream, std::function<void(OsmElement *)> processor);
+void ProcessOsmElementsFromXML(SourceReader & stream, std::function<void(OsmElement *)> processor);
+}  // namespace generator

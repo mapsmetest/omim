@@ -1,5 +1,5 @@
 #include "indexer/scales.hpp"
-#include "indexer/mercator.hpp"
+#include "geometry/mercator.hpp"
 
 #include "base/math.hpp"
 
@@ -9,6 +9,11 @@
 namespace scales
 {
   static const int INITIAL_LEVEL = 1;
+
+  int GetMinAllowableIn3dScale()
+  {
+    return min(16, min(GetNavigation3dScale(), GetPedestrianNavigation3dScale()));
+  }
 
   double GetScaleLevelD(double ratio)
   {

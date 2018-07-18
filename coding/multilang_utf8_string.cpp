@@ -2,30 +2,131 @@
 
 #include "defines.hpp"
 
-static char const * gLangs[] = {
-    "default",
-    "en", "ja", "fr", "ko_rm", "ar", "de", "int_name", "ru", "sv", "zh", "fi", "be", "ka", "ko",
-    "he", "nl", "ga", "ja_rm", "el", "it", "es", "zh_pinyin", "th", "cy", "sr", "uk", "ca", "hu",
-    "hsb", "eu", "fa", "br", "pl", "hy", "kn", "sl", "ro", "sq", "am", "fy", "cs", "gd", "sk",
-    "af", "ja_kana", "lb", "pt", "hr", "fur", "vi", "tr", "bg", "eo", "lt", "la", "kk", "gsw",
-    "et", "ku", "mn", "mk", "lv", "hi" };
+using namespace std;
 
-int8_t StringUtf8Multilang::GetLangIndex(string const & lang)
+namespace
 {
-  static_assert(ARRAY_SIZE(gLangs) == MAX_SUPPORTED_LANGUAGES, "");
+// TODO(AlexZ): Review and replace invalid languages which does not map correctly to
+// iOS/Android locales/UI by valid and more popular ones.
+// Languages below were choosen after sorting name:<lang> tags in 2011.
+// Note, that it's not feasible to increase languages number here due to
+// our current encoding (6 bit to store language code).
+StringUtf8Multilang::Languages const g_languages = {
+    {{"default", "Native for each country", "Any-Latin"},
+     {"en", "English", ""},
+     {"ja", "日本語", ""},
+     {"fr", "Français", ""},
+     {"ko_rm", "Korean (Romanized)", "Korean-Latin/BGN"},
+     {"ar", "العربية", "Any-Latin"},
+     {"de", "Deutsch", ""},
+     {"int_name", "International (Latin)", "Any-Latin"},
+     {"ru", "Русский", "Russian-Latin/BGN"},
+     {"sv", "Svenska", ""},
+     {"zh", "中文", "Any-Latin"},
+     {"fi", "Suomi", ""},
+     {"be", "Беларуская", "Belarusian-Latin/BGN"},
+     {"ka", "ქართული", "Georgian-Latin"},
+     {"ko", "한국어", "Hangul-Latin/BGN"},
+     {"he", "עברית", "Hebrew-Latin"},
+     {"nl", "Nederlands", ""},
+     {"ga", "Gaeilge", ""},
+     {"ja_rm", "Japanese (Romanized)", "Any-Latin"},
+     {"el", "Ελληνικά", "Greek-Latin"},
+     {"it", "Italiano", ""},
+     {"es", "Español", ""},
+     {"zh_pinyin", "Chinese (Pinyin)", "Any-Latin"},
+     {"th", "ไทย", ""},  // Thai-Latin
+     {"cy", "Cymraeg", ""},
+     {"sr", "Српски", "Serbian-Latin/BGN"},
+     {"uk", "Українська", "Ukrainian-Latin/BGN"},
+     {"ca", "Català", ""},
+     {"hu", "Magyar", ""},
+     {"hsb", "Hornjoserbšćina", ""},
+     {"eu", "Euskara", ""},
+     {"fa", "فارسی", "Any-Latin"},
+     {"br", "Breton", ""},
+     {"pl", "Polski", ""},
+     {"hy", "Հայերէն", "Armenian-Latin"},
+     {"kn", "ಕನ್ನಡ", "Kannada-Latin"},
+     {"sl", "Slovenščina", ""},
+     {"ro", "Română", ""},
+     {"sq", "Shqipe", ""},
+     {"am", "አማርኛ", "Amharic-Latin/BGN"},
+     {"fy", "Frysk", ""},
+     {"cs", "Čeština", ""},
+     {"gd", "Gàidhlig", ""},
+     {"sk", "Slovenčina", ""},
+     {"af", "Afrikaans", ""},
+     {"ja_kana", "日本語(カタカナ)", "Katakana-Latin"},
+     {"lb", "Luxembourgish", ""},
+     {"pt", "Português", ""},
+     {"hr", "Hrvatski", ""},
+     {"fur", "Friulian", ""},
+     {"vi", "Tiếng Việt", ""},
+     {"tr", "Türkçe", ""},
+     {"bg", "Български", "Bulgarian-Latin/BGN"},
+     {"eo", "Esperanto", ""},
+     {"lt", "Lietuvių", ""},
+     {"la", "Latin", ""},
+     {"kk", "Қазақ", "Kazakh-Latin/BGN"},
+     {"gsw", "Schwiizertüütsch", ""},
+     {"et", "Eesti", ""},
+     {"ku", "Kurdish", "Any-Latin"},
+     {"mn", "Mongolian", "Mongolian-Latin/BGN"},
+     {"mk", "Македонски", "Macedonian-Latin/BGN"},
+     {"lv", "Latviešu", ""},
+     {"hi", "हिन्दी", "Any-Latin"}}};
 
-  for (size_t i = 0; i < ARRAY_SIZE(gLangs); ++i)
-    if (lang == gLangs[i])
-      return static_cast<int8_t>(i);
+static_assert(g_languages.size() == StringUtf8Multilang::kMaxSupportedLanguages,
+              "With current encoding we are limited to 64 languages max.");
+}  // namespace
 
-  return UNSUPPORTED_LANGUAGE_CODE;
+int8_t constexpr StringUtf8Multilang::kUnsupportedLanguageCode;
+int8_t constexpr StringUtf8Multilang::kDefaultCode;
+int8_t constexpr StringUtf8Multilang::kEnglishCode;
+int8_t constexpr StringUtf8Multilang::kInternationalCode;
+
+// static
+StringUtf8Multilang::Languages const & StringUtf8Multilang::GetSupportedLanguages()
+{
+  // Asserts for generic class constants.
+  ASSERT_EQUAL(g_languages[kDefaultCode].m_code, string("default"), ());
+  ASSERT_EQUAL(g_languages[kInternationalCode].m_code, string("int_name"), ());
+  return g_languages;
 }
 
+// static
+int8_t StringUtf8Multilang::GetLangIndex(string const & lang)
+{
+  for (size_t i = 0; i < g_languages.size(); ++i)
+    if (lang == g_languages[i].m_code)
+      return static_cast<int8_t>(i);
+
+  return kUnsupportedLanguageCode;
+}
+
+// static
 char const * StringUtf8Multilang::GetLangByCode(int8_t langCode)
 {
-  if (langCode < 0 || langCode > ARRAY_SIZE(gLangs) - 1)
+  if (langCode < 0 || langCode >= static_cast<int8_t>(g_languages.size()))
     return "";
-  return gLangs[langCode];
+  return g_languages[langCode].m_code;
+}
+
+// static
+char const * StringUtf8Multilang::GetLangNameByCode(int8_t langCode)
+{
+  if (langCode < 0 || langCode >= static_cast<int8_t>(g_languages.size()))
+    return "";
+  return g_languages[langCode].m_name;
+}
+
+// static
+char const * StringUtf8Multilang::GetTransliteratorIdByCode(int8_t langCode)
+{
+  if (langCode < 0 || langCode >= static_cast<int8_t>(g_languages.size()))
+    return "";
+  return g_languages[langCode].m_transliteratorId;
 }
 
 size_t StringUtf8Multilang::GetNextIndex(size_t i) const
@@ -99,49 +200,40 @@ bool StringUtf8Multilang::GetString(int8_t lang, string & utf8s) const
   return false;
 }
 
-namespace
+bool StringUtf8Multilang::HasString(int8_t lang) const
 {
-
-struct Printer
-{
-  string & m_out;
-  Printer(string & out) : m_out(out) {}
-  bool operator()(int8_t code, string const & name) const
+  for(size_t i = 0; i < m_s.size(); i = GetNextIndex(i))
   {
-    m_out += string(StringUtf8Multilang::GetLangByCode(code)) + string(":") + name + " ";
-    return true;
+    if ((m_s[i] & 0x3F) == lang)
+      return true;
   }
-};
-
-struct Finder
-{
-  string const & m_s;
-  int8_t m_res;
-  Finder(string const & s) : m_s(s), m_res(-1) {}
-  bool operator()(int8_t code, string const & name)
-  {
-    if (name == m_s)
-    {
-      m_res = code;
-      return false;
-    }
-    return true;
-  }
-};
-
-} // namespace
+  
+  return false;
+}
 
 int8_t StringUtf8Multilang::FindString(string const & utf8s) const
 {
-  Finder finder(utf8s);
-  ForEachRef(finder);
-  return finder.m_res;
+  int8_t result = kUnsupportedLanguageCode;
+
+  ForEach([&utf8s, &result](int8_t code, string const & name) {
+    if (name == utf8s)
+    {
+      result = code;
+      return base::ControlFlow::Break;
+    }
+    return base::ControlFlow::Continue;
+  });
+
+  return result;
 }
 
 string DebugPrint(StringUtf8Multilang const & s)
 {
-  string out;
-  Printer printer(out);
-  s.ForEachRef(printer);
-  return out;
+  string result;
+
+  s.ForEach([&result](int8_t code, string const & name) {
+    result += string(StringUtf8Multilang::GetLangByCode(code)) + string(":") + name + " ";
+  });
+
+  return result;
 }

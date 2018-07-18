@@ -1,42 +1,33 @@
 #import "MWMTextView.h"
-#import "Common.h"
+#import "MWMCommon.h"
 
 @interface MWMTextView ()
 
-@property (nonatomic) UILabel * placeholderView;
+@property (nonatomic, readwrite) UILabel * placeholderView;
 
 @end
 
 @implementation MWMTextView
 
-- (instancetype)initWithCoder:(NSCoder *)coder
+- (void)awakeFromNib
 {
-  self = [super initWithCoder:coder];
-  if (self)
-    [self prepare];
-
-  return self;
-}
-
-- (instancetype)initWithFrame:(CGRect)frame textContainer:(NSTextContainer *)textContainer
-{
-  self = [super initWithFrame:frame textContainer:textContainer];
-  if (self)
-    [self prepare];
-
-  return self;
-}
-
-- (void)prepare
-{
+  [super awakeFromNib];
   [self setTextContainerInset:UIEdgeInsetsZero];
 
   [self updatePlaceholderVisibility];
 
-  NSNotificationCenter * defaultCenter = [NSNotificationCenter defaultCenter];
-  [defaultCenter addObserver:self selector:@selector(textDidChange:)
-                        name:UITextViewTextDidChangeNotification object:self];
+  [NSNotificationCenter.defaultCenter addObserver:self
+                                         selector:@selector(textDidChange:)
+                                             name:UITextViewTextDidChangeNotification
+                                           object:self];
   self.clipsToBounds = YES;
+}
+
+- (void)dealloc
+{
+  [NSNotificationCenter.defaultCenter removeObserver:self
+                                                name:UITextViewTextDidChangeNotification
+                                              object:nil];
 }
 
 - (UILabel *)placeholderView
@@ -45,7 +36,7 @@
   {
     _placeholderView = [[UILabel alloc] initWithFrame:self.bounds];
     _placeholderView.opaque = NO;
-    _placeholderView.backgroundColor = [UIColor clearColor];
+    _placeholderView.backgroundColor = UIColor.clearColor;
     _placeholderView.textColor = [UIColor lightGrayColor];
     _placeholderView.textAlignment = self.textAlignment;
     _placeholderView.userInteractionEnabled = NO;

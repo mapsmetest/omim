@@ -1,14 +1,14 @@
 #pragma once
 
-#include "drape/pointers.hpp"
 #include "drape/buffer_base.hpp"
+#include "drape/pointers.hpp"
 
 namespace dp
 {
-
 class GPUBuffer : public BufferBase
 {
-  typedef BufferBase base_t;
+  using TBase = BufferBase;
+
 public:
   enum Target
   {
@@ -17,46 +17,28 @@ public:
   };
 
 public:
-  GPUBuffer(Target t, uint8_t elementSize, uint16_t capacity);
+  GPUBuffer(Target t, void const * data, uint8_t elementSize, uint32_t capacity);
   ~GPUBuffer();
 
-  void UploadData(void const * data, uint16_t elementCount);
+  void UploadData(void const * data, uint32_t elementCount);
   void Bind();
 
-protected:
-  void * Map();
-  void UpdateData(void * gpuPtr, void const * data, uint16_t elementOffset, uint16_t elementCount);
+  void * Map(uint32_t elementOffset, uint32_t elementCount);
+  void UpdateData(void * gpuPtr, void const * data, uint32_t elementOffset, uint32_t elementCount);
   void Unmap();
 
-  /// discard old data
-  void Resize(uint16_t elementCount);
+protected:
+  // Discard old data.
+  void Resize(void const * data, uint32_t elementCount);
 
 private:
   friend class GPUBufferMapper;
   Target m_t;
   uint32_t m_bufferID;
+  uint32_t m_mappingOffset;
 
 #ifdef DEBUG
   bool m_isMapped;
 #endif
 };
-
-class GPUBufferMapper
-{
-public:
-  GPUBufferMapper(RefPointer<GPUBuffer> buffer);
-  ~GPUBufferMapper();
-
-  void UpdateData(void const * data, uint16_t elementOffset, uint16_t elementCount);
-
-private:
-#ifdef DEBUG
-  static uint32_t m_mappedDataBuffer;
-  static uint32_t m_mappedIndexBuffer;
-#endif
-
-  RefPointer<GPUBuffer> m_buffer;
-  void * m_gpuPtr;
-};
-
-} // namespace dp
+}  // namespace dp

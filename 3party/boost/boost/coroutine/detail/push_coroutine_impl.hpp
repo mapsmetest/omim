@@ -45,14 +45,13 @@ public:
 
     push_coroutine_impl( coroutine_context * caller,
                          coroutine_context * callee,
-                         bool unwind, bool preserve_fpu) :
+                         bool unwind) :
         flags_( 0),
         except_(),
         caller_( caller),
         callee_( callee)
     {
         if ( unwind) flags_ |= flag_force_unwind;
-        if ( preserve_fpu) flags_ |= flag_preserve_fpu;
     }
 
     bool force_unwind() const BOOST_NOEXCEPT
@@ -60,9 +59,6 @@ public:
 
     bool unwind_requested() const BOOST_NOEXCEPT
     { return 0 != ( flags_ & flag_unwind_stack); }
-
-    bool preserve_fpu() const BOOST_NOEXCEPT
-    { return 0 != ( flags_ & flag_preserve_fpu); }
 
     bool is_started() const BOOST_NOEXCEPT
     { return 0 != ( flags_ & flag_started); }
@@ -81,8 +77,7 @@ public:
             param_type to( unwind_t::force_unwind);
             caller_->jump(
                 * callee_,
-                reinterpret_cast< intptr_t >( & to),
-                preserve_fpu() );
+                & to);
             flags_ &= ~flag_unwind_stack;
 
             BOOST_ASSERT( is_complete() );
@@ -97,11 +92,10 @@ public:
         flags_ |= flag_running;
         param_type to( const_cast< Arg * >( & arg), this);
         param_type * from(
-            reinterpret_cast< param_type * >(
+            static_cast< param_type * >(
                 caller_->jump(
                     * callee_,
-                    reinterpret_cast< intptr_t >( & to),
-                    preserve_fpu() ) ) );
+                    & to) ) );
         flags_ &= ~flag_running;
         if ( from->do_unwind) throw forced_unwind();
         if ( except_) rethrow_exception( except_);
@@ -115,11 +109,10 @@ public:
         flags_ |= flag_running;
         param_type to( const_cast< Arg * >( & arg), this);
         param_type * from(
-            reinterpret_cast< param_type * >(
+            static_cast< param_type * >(
                 caller_->jump(
                     * callee_,
-                    reinterpret_cast< intptr_t >( & to),
-                    preserve_fpu() ) ) );
+                    & to) ) );
         flags_ &= ~flag_running;
         if ( from->do_unwind) throw forced_unwind();
         if ( except_) rethrow_exception( except_);
@@ -142,14 +135,13 @@ public:
 
     push_coroutine_impl( coroutine_context * caller,
                          coroutine_context * callee,
-                         bool unwind, bool preserve_fpu) :
+                         bool unwind) :
         flags_( 0),
         except_(),
         caller_( caller),
         callee_( callee)
     {
         if ( unwind) flags_ |= flag_force_unwind;
-        if ( preserve_fpu) flags_ |= flag_preserve_fpu;
     }
 
     bool force_unwind() const BOOST_NOEXCEPT
@@ -157,9 +149,6 @@ public:
 
     bool unwind_requested() const BOOST_NOEXCEPT
     { return 0 != ( flags_ & flag_unwind_stack); }
-
-    bool preserve_fpu() const BOOST_NOEXCEPT
-    { return 0 != ( flags_ & flag_preserve_fpu); }
 
     bool is_started() const BOOST_NOEXCEPT
     { return 0 != ( flags_ & flag_started); }
@@ -178,8 +167,7 @@ public:
             param_type to( unwind_t::force_unwind);
             caller_->jump(
                 * callee_,
-                reinterpret_cast< intptr_t >( & to),
-                preserve_fpu() );
+                & to);
             flags_ &= ~flag_unwind_stack;
 
             BOOST_ASSERT( is_complete() );
@@ -194,11 +182,10 @@ public:
         flags_ |= flag_running;
         param_type to( & arg, this);
         param_type * from(
-            reinterpret_cast< param_type * >(
+            static_cast< param_type * >(
                 caller_->jump(
                     * callee_,
-                    reinterpret_cast< intptr_t >( & to),
-                    preserve_fpu() ) ) );
+                    & to) ) );
         flags_ &= ~flag_running;
         if ( from->do_unwind) throw forced_unwind();
         if ( except_) rethrow_exception( except_);
@@ -221,35 +208,31 @@ public:
 
     push_coroutine_impl( coroutine_context * caller,
                          coroutine_context * callee,
-                         bool unwind, bool preserve_fpu) :
+                         bool unwind) :
         flags_( 0),
         except_(),
         caller_( caller),
         callee_( callee)
     {
         if ( unwind) flags_ |= flag_force_unwind;
-        if ( preserve_fpu) flags_ |= flag_preserve_fpu;
     }
 
-    bool force_unwind() const BOOST_NOEXCEPT
+    inline bool force_unwind() const BOOST_NOEXCEPT
     { return 0 != ( flags_ & flag_force_unwind); }
 
-    bool unwind_requested() const BOOST_NOEXCEPT
+    inline bool unwind_requested() const BOOST_NOEXCEPT
     { return 0 != ( flags_ & flag_unwind_stack); }
 
-    bool preserve_fpu() const BOOST_NOEXCEPT
-    { return 0 != ( flags_ & flag_preserve_fpu); }
-
-    bool is_started() const BOOST_NOEXCEPT
+    inline bool is_started() const BOOST_NOEXCEPT
     { return 0 != ( flags_ & flag_started); }
 
-    bool is_running() const BOOST_NOEXCEPT
+    inline bool is_running() const BOOST_NOEXCEPT
     { return 0 != ( flags_ & flag_running); }
 
-    bool is_complete() const BOOST_NOEXCEPT
+    inline bool is_complete() const BOOST_NOEXCEPT
     { return 0 != ( flags_ & flag_complete); }
 
-    void unwind_stack() BOOST_NOEXCEPT
+    inline void unwind_stack() BOOST_NOEXCEPT
     {
         if ( is_started() && ! is_complete() && force_unwind() )
         {
@@ -257,15 +240,14 @@ public:
             param_type to( unwind_t::force_unwind);
             caller_->jump(
                 * callee_,
-                reinterpret_cast< intptr_t >( & to),
-                preserve_fpu() );
+                & to);
             flags_ &= ~flag_unwind_stack;
 
             BOOST_ASSERT( is_complete() );
         }
     }
 
-    void push()
+    inline void push()
     {
         BOOST_ASSERT( ! is_running() );
         BOOST_ASSERT( ! is_complete() );
@@ -273,11 +255,10 @@ public:
         flags_ |= flag_running;
         param_type to( this);
         param_type * from(
-            reinterpret_cast< param_type * >(
+            static_cast< param_type * >(
                 caller_->jump(
                     * callee_,
-                    reinterpret_cast< intptr_t >( & to),
-                    preserve_fpu() ) ) );
+                    & to) ) );
         flags_ &= ~flag_running;
         if ( from->do_unwind) throw forced_unwind();
         if ( except_) rethrow_exception( except_);

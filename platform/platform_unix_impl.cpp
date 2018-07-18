@@ -4,10 +4,12 @@
 #include "coding/file_name_utils.hpp"
 
 #include "base/logging.hpp"
-#include "base/regexp.hpp"
 #include "base/scope_guard.hpp"
 
 #include "std/algorithm.hpp"
+#include "std/cstring.hpp"
+#include "std/regex.hpp"
+#include "std/unique_ptr.hpp"
 
 #include <dirent.h>
 #include <sys/types.h>
@@ -20,11 +22,24 @@
   #include <sys/vfs.h>
 #endif
 
+namespace
+{
+struct CloseDir
+{
+  void operator()(DIR * dir) const
+  {
+    if (dir)
+      closedir(dir);
+  }
+};
+}  // namespace
+
 void Platform::GetSystemFontNames(FilesList & res) const
 {
 #if defined(OMIM_OS_MAC) || defined(OMIM_OS_IPHONE)
 #else
   char const * fontsWhitelist[] = {
+    "Roboto-Medium.ttf",
     "Roboto-Regular.ttf",
     "DroidSansFallback.ttf",
     "DroidSansFallbackFull.ttf",
@@ -130,10 +145,42 @@ Platform::EError Platform::GetFileType(string const & path, EFileType & type)
   return ERR_OK;
 }
 
+// static
 bool Platform::IsFileExistsByFullPath(string const & filePath)
 {
   struct stat s;
   return stat(filePath.c_str(), &s) == 0;
+}
+
+//static
+void Platform::DisableBackupForFile(string const & filePath) {}
+
+// static
+string Platform::GetCurrentWorkingDirectory() noexcept
+{
+  char path[PATH_MAX];
+  char const * const dir = getcwd(path, PATH_MAX);
+  if (dir == nullptr)
+    return {};
+  return dir;
+}
+
+bool Platform::IsDirectoryEmpty(string const & directory)
+{
+  unique_ptr<DIR, CloseDir> dir(opendir(directory.c_str()));
+  if (!dir)
+    return true;
+
+  struct dirent * entry;
+
+  // Invariant: all files met so far are "." or "..".
+  while ((entry = readdir(dir.get())) != nullptr)
+  {
+    // A file is not a special UNIX file. Early exit here.
+    if (strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0)
+      return false;
+  }
+  return true;
 }
 
 bool Platform::GetFileSizeByFullPath(string const & filePath, uint64_t & size)
@@ -152,12 +199,15 @@ Platform::TStorageStatus Platform::GetWritableStorageStatus(uint64_t neededSize)
   struct statfs st;
   int const ret = statfs(m_writableDir.c_str(), &st);
 
-  LOG(LDEBUG, ("statfs return = ", ret,
-               "; block size = ", st.f_bsize,
-               "; blocks available = ", st.f_bavail));
+  LOG(LDEBUG, ("statfs return =", ret,
+               "; block size =", st.f_bsize,
+               "; blocks available =", st.f_bavail));
 
   if (ret != 0)
+  {
+    LOG(LERROR, ("Path:", m_writableDir, "statfs error:", ErrnoToError()));
     return STORAGE_DISCONNECTED;
+  }
 
   /// @todo May be add additional storage space.
   if (st.f_bsize * st.f_bavail < neededSize)
@@ -166,28 +216,38 @@ Platform::TStorageStatus Platform::GetWritableStorageStatus(uint64_t neededSize)
   return STORAGE_OK;
 }
 
+uint64_t Platform::GetWritableStorageSpace() const
+{
+  struct statfs st;
+  int const ret = statfs(m_writableDir.c_str(), &st);
+
+  LOG(LDEBUG, ("statfs return =", ret,
+               "; block size =", st.f_bsize,
+               "; blocks available =", st.f_bavail));
+
+  if (ret != 0)
+    LOG(LERROR, ("Path:", m_writableDir, "statfs error:", ErrnoToError()));
+
+  return (ret != 0) ? 0 : st.f_bsize * st.f_bavail;
+}
+
 namespace pl
 {
-
 void EnumerateFilesByRegExp(string const & directory, string const & regexp,
                             vector<string> & res)
 {
-  DIR * dir;
-  struct dirent * entry;
-  if ((dir = opendir(directory.c_str())) == NULL)
+  unique_ptr<DIR, CloseDir> dir(opendir(directory.c_str()));
+  if (!dir)
     return;
 
-  regexp::RegExpT exp;
-  regexp::Create(regexp, exp);
+  regex exp(regexp);
 
-  while ((entry = readdir(dir)) != 0)
+  struct dirent * entry;
+  while ((entry = readdir(dir.get())) != 0)
   {
     string const name(entry->d_name);
-    if (regexp::IsExist(name, exp))
+    if (regex_search(name.begin(), name.end(), exp))
       res.push_back(name);
   }
-
-  closedir(dir);
 }
-
-}
+}  // namespace pl

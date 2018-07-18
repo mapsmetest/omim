@@ -340,6 +340,8 @@ public :
           >
     {};
 
+    typedef typename Strategy::radius_type radius_type;
+
     inline cross_track()
     {}
 
@@ -365,7 +367,7 @@ public :
 #if !defined(BOOST_MSVC)
         BOOST_CONCEPT_ASSERT
             (
-                (concept::PointDistanceStrategy<Strategy, Point, PointOfSegment>)
+                (concepts::PointDistanceStrategy<Strategy, Point, PointOfSegment>)
             );
 #endif
 
@@ -492,6 +494,8 @@ public :
           >
     {};
 
+    typedef typename Strategy::radius_type radius_type;
+
     inline cross_track()
     {}
 
@@ -517,7 +521,7 @@ public :
 #if !defined(BOOST_MSVC)
         BOOST_CONCEPT_ASSERT
             (
-                (concept::PointDistanceStrategy<Strategy, Point, PointOfSegment>)
+                (concepts::PointDistanceStrategy<Strategy, Point, PointOfSegment>)
             );
 #endif
         typedef typename return_type<Point, PointOfSegment>::type return_type;

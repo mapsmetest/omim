@@ -1,18 +1,25 @@
 #pragma once
 #include "base/assert.hpp"
 
-#include "std/algorithm.hpp"
-#include "std/cmath.hpp"
-#include "std/functional.hpp"
-#include "std/limits.hpp"
-#include "std/type_traits.hpp"
+#include <algorithm>
+#include <climits>
+#include <cmath>
+#include <functional>
+#include <limits>
+#include <type_traits>
 
 #include <boost/integer.hpp>
 
+namespace math
+{
+  double constexpr pi = 3.14159265358979323846;
+  double constexpr pi2 = pi / 2.;
+  double constexpr pi4 = pi / 4.;
+  double constexpr twicePi = 2. * pi;
+}  // namespace math
 
 namespace my
 {
-
 template <typename T> inline T Abs(T x)
 {
   return (x < 0 ? -x : x);
@@ -27,8 +34,8 @@ template <typename T> inline T Abs(T x)
 template <typename TFloat>
 bool AlmostEqualULPs(TFloat x, TFloat y, unsigned int maxULPs = 256)
 {
-  static_assert(is_floating_point<TFloat>::value, "");
-  static_assert(numeric_limits<TFloat>::is_iec559, "");
+  static_assert(std::is_floating_point<TFloat>::value, "");
+  static_assert(std::numeric_limits<TFloat>::is_iec559, "");
 
   // Make sure maxUlps is non-negative and small enough that the
   // default NaN won't compare as equal to anything.
@@ -70,7 +77,14 @@ inline bool AlmostEqualAbs(TFloat x, TFloat y, TFloat eps)
 template <typename TFloat>
 inline bool AlmostEqualRel(TFloat x, TFloat y, TFloat eps)
 {
-  return fabs(x - y) < eps * max(fabs(x), fabs(y));
+  return fabs(x - y) < eps * std::max(fabs(x), fabs(y));
+}
+
+// Returns true if x and y are equal up to the absolute or relative difference eps.
+template <typename TFloat>
+inline bool AlmostEqualAbsOrRel(TFloat x, TFloat y, TFloat eps)
+{
+  return AlmostEqualAbs(x, y, eps) || AlmostEqualRel(x, y, eps);
 }
 
 template <typename TFloat> inline TFloat DegToRad(TFloat deg)
@@ -88,13 +102,8 @@ template <typename T> inline T id(T const & x)
   return x;
 }
 
-template <typename T> inline T sq(T const & x)
-{
-  return x * x;
-}
-
-template <typename T, typename TMin, typename TMax>
-inline T clamp(T x, TMin xmin, TMax xmax)
+template <typename T>
+inline T clamp(T const x, T const xmin, T const xmax)
 {
   if (x > xmax)
     return xmax;
@@ -103,11 +112,21 @@ inline T clamp(T x, TMin xmin, TMax xmax)
   return x;
 }
 
-template <typename T> inline bool between_s(T a, T b, T x)
+template <typename T>
+inline T cyclicClamp(T const x, T const xmin, T const xmax)
+{
+  if (x > xmax)
+    return xmin;
+  if (x < xmin)
+    return xmax;
+  return x;
+}
+
+template <typename T> inline bool between_s(T const a, T const b, T const x)
 {
   return (a <= x && x <= b);
 }
-template <typename T> inline bool between_i(T a, T b, T x)
+template <typename T> inline bool between_i(T const a, T const b, T const x)
 {
   return (a < x && x < b);
 }
@@ -161,57 +180,32 @@ inline uint32_t NextPowOf2(uint32_t v)
   return v + 1;
 }
 
+template <typename Number,
+          typename EnableIf = typename std::enable_if<
+            std::is_integral<Number>::value, void>::type>
 // Greatest Common Divisor
-template <typename T> T GCD(T a, T b)
-{
-  T multiplier = 1;
-  T gcd = 1;
-  while (true)
-  {
-    if (a == 0 || b == 0)
-    {
-      gcd = max(a, b);
-      break;
-    }
+Number constexpr GCD(Number const a, Number const b) { return b == 0 ? a : GCD(b, a % b); }
 
-    if (a == 1 || b == 1)
-    {
-      gcd = 1;
-      break;
-    }
-
-    if ((a & 0x1) == 0 && (b & 0x1) == 0)
-    {
-      multiplier <<= 1;
-      a >>= 1;
-      b >>= 1;
-      continue;
-    }
-
-    if ((a & 0x1) != 0 && (b & 0x1) != 0)
-    {
-      T const minV = min(a, b);
-      T const maxV = max(a, b);
-      a = (maxV - minV) >> 1;
-      b = minV;
-      continue;
-    }
-
-    if ((a & 0x1) != 0)
-      swap(a, b);
-
-    a >>= 1;
-  }
-
-  return multiplier * gcd;
-}
+template <typename Number,
+          typename EnableIf = typename std::enable_if<
+            std::is_integral<Number>::value, void>::type>
+// Lowest Common Multiple.
+Number constexpr LCM(Number const a, Number const b) { return a / GCD(a, b) * b; }
 
 /// Calculate hash for the pair of values.
 template <typename T1, typename T2>
 size_t Hash(T1 const & t1, T2 const & t2)
 {
   /// @todo Probably, we need better hash for 2 integral types.
-  return (hash<T1>()(t1) ^ (hash<T2>()(t2) << 1));
+  return (std::hash<T1>()(t1) ^ (std::hash<T2>()(t2) << 1));
 }
 
+template <typename Number,
+          typename EnableIf = typename std::enable_if<
+            std::is_integral<Number>::value || std::is_floating_point<Number>::value,
+            void>::type>
+int constexpr Sign(Number const number) noexcept
+{
+  return number == 0 ? 0 : number > 0 ? 1 : -1;
 }
+}  // namespace my

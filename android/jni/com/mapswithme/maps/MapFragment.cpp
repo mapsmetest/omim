@@ -1,141 +1,122 @@
 #include "Framework.hpp"
-#include "MapStorage.hpp"
 
-#include "../country/country_helper.hpp"
+#include "com/mapswithme/core/jni_helper.hpp"
 
-#include "../core/jni_helper.hpp"
-
-#include "../platform/Platform.hpp"
-
-#include "../../../nv_event/nv_event.hpp"
-
-#include "map/country_status_display.hpp"
+#include "com/mapswithme/platform/Platform.hpp"
 
 #include "storage/index.hpp"
 
 #include "base/logging.hpp"
 
 #include "platform/file_logging.hpp"
+#include "platform/settings.hpp"
 
 
 extern "C"
 {
-  JNIEXPORT void JNICALL
-  Java_com_mapswithme_maps_MapFragment_nativeOnLocationError(JNIEnv * env, jobject thiz,
-      int errorCode)
-  {
-    g_framework->OnLocationError(errorCode);
-  }
+using namespace storage;
 
-  JNIEXPORT void JNICALL
-  Java_com_mapswithme_maps_MapFragment_nativeLocationUpdated(JNIEnv * env, jobject thiz,
-      jlong time, jdouble lat, jdouble lon,
-      jfloat accuracy, jdouble altitude, jfloat speed, jfloat bearing)
-  {
-    location::GpsInfo info;
-    info.m_source = location::EAndroidNative;
+JNIEXPORT void JNICALL
+Java_com_mapswithme_maps_MapFragment_nativeCompassUpdated(JNIEnv * env, jclass clazz, jdouble magneticNorth, jdouble trueNorth, jboolean forceRedraw)
+{
+  location::CompassInfo info;
+  info.m_bearing = (trueNorth >= 0.0) ? trueNorth : magneticNorth;
 
-    info.m_timestamp = static_cast<double>(time) / 1000.0;
-    info.m_latitude = lat;
-    info.m_longitude = lon;
+  g_framework->OnCompassUpdated(info, forceRedraw);
+}
 
-    if (accuracy > 0.0)
-      info.m_horizontalAccuracy = accuracy;
+JNIEXPORT void JNICALL
+Java_com_mapswithme_maps_MapFragment_nativeStorageConnected(JNIEnv * env, jclass clazz)
+{
+  android::Platform::Instance().OnExternalStorageStatusChanged(true);
+  g_framework->AddLocalMaps();
+}
 
-    if (altitude != 0.0)
-    {
-      info.m_altitude = altitude;
-      info.m_verticalAccuracy = accuracy;
-    }
+JNIEXPORT void JNICALL
+Java_com_mapswithme_maps_MapFragment_nativeStorageDisconnected(JNIEnv * env, jclass clazz)
+{
+  android::Platform::Instance().OnExternalStorageStatusChanged(false);
+  g_framework->RemoveLocalMaps();
+}
 
-    if (bearing > 0.0)
-      info.m_bearing = bearing;
+JNIEXPORT void JNICALL
+Java_com_mapswithme_maps_MapFragment_nativeScalePlus(JNIEnv * env, jclass clazz)
+{
+  g_framework->Scale(::Framework::SCALE_MAG);
+}
 
-    if (speed > 0.0)
-      info.m_speed = speed;
+JNIEXPORT void JNICALL
+Java_com_mapswithme_maps_MapFragment_nativeScaleMinus(JNIEnv * env, jclass clazz)
+{
+  g_framework->Scale(::Framework::SCALE_MIN);
+}
 
-    LOG_MEMORY_INFO();    
-    g_framework->OnLocationUpdated(info);
-  }
+JNIEXPORT jboolean JNICALL
+Java_com_mapswithme_maps_MapFragment_nativeShowMapForUrl(JNIEnv * env, jclass clazz, jstring url)
+{
+  return g_framework->ShowMapForURL(jni::ToNativeString(env, url));
+}
 
-// Fixed optimization bug for x86 (reproduced on Asus ME302C).
-#pragma clang push_options
-#pragma clang optimize off
+JNIEXPORT jboolean JNICALL
+Java_com_mapswithme_maps_MapFragment_nativeCreateEngine(JNIEnv * env, jclass clazz,
+                                                        jobject surface, jint density,
+                                                        jboolean firstLaunch,
+                                                        jboolean isLaunchByDeepLink)
+{
+  return g_framework->CreateDrapeEngine(env, surface, density, firstLaunch, isLaunchByDeepLink);
+}
 
-  JNIEXPORT void JNICALL
-  Java_com_mapswithme_maps_MapFragment_nativeCompassUpdated(JNIEnv * env, jobject thiz,
-      jdouble magneticNorth, jdouble trueNorth, jboolean force)
-  {
-    location::CompassInfo info;
-    info.m_bearing = (trueNorth >= 0.0) ? trueNorth : magneticNorth;
+JNIEXPORT jboolean JNICALL
+Java_com_mapswithme_maps_MapFragment_nativeIsEngineCreated(JNIEnv * env, jclass clazz)
+{
+  return g_framework->IsDrapeEngineCreated();
+}
 
-    g_framework->OnCompassUpdated(info, force);
-  }
+JNIEXPORT jboolean JNICALL
+Java_com_mapswithme_maps_MapFragment_nativeAttachSurface(JNIEnv * env, jclass clazz, jobject surface)
+{
+  return g_framework->AttachSurface(env, surface);
+}
 
-#pragma clang pop_options
+JNIEXPORT void JNICALL
+Java_com_mapswithme_maps_MapFragment_nativeDetachSurface(JNIEnv * env, jclass clazz, jboolean destroyContext)
+{
+  g_framework->DetachSurface(destroyContext);
+}
 
-  JNIEXPORT jfloatArray JNICALL
-  Java_com_mapswithme_maps_location_LocationHelper_nativeUpdateCompassSensor(
-      JNIEnv * env, jobject thiz, jint ind, jfloatArray arr)
-  {
-    int const count = 3;
+JNIEXPORT void JNICALL
+Java_com_mapswithme_maps_MapFragment_nativeSurfaceChanged(JNIEnv * env, jclass clazz, jint w, jint h)
+{
+  g_framework->Resize(w, h);
+}
 
-    // get Java array
-    jfloat buffer[3];
-    env->GetFloatArrayRegion(arr, 0, count, buffer);
+JNIEXPORT void JNICALL
+Java_com_mapswithme_maps_MapFragment_nativeOnTouch(JNIEnv * env, jclass clazz, jint action,
+                                                   jint id1, jfloat x1, jfloat y1,
+                                                   jint id2, jfloat x2, jfloat y2,
+                                                   jint maskedPointer)
+{
+  g_framework->Touch(action,
+                     android::Framework::Finger(id1, x1, y1),
+                     android::Framework::Finger(id2, x2, y2), maskedPointer);
+}
 
-    // get the result
-    g_framework->UpdateCompassSensor(ind, buffer);
+JNIEXPORT void JNICALL
+Java_com_mapswithme_maps_MapFragment_nativeSetupWidget(JNIEnv * env, jclass clazz, jint widget, jfloat x, jfloat y, jint anchor)
+{
+  g_framework->SetupWidget(static_cast<gui::EWidget>(widget), x, y, static_cast<dp::Anchor>(anchor));
+}
 
-    // pass result back to Java
-    jfloatArray ret = (jfloatArray)env->NewFloatArray(count);
-    env->SetFloatArrayRegion(ret, 0, count, buffer);
-    return ret;
-  }
+JNIEXPORT void JNICALL
+Java_com_mapswithme_maps_MapFragment_nativeApplyWidgets(JNIEnv * env, jclass clazz)
+{
+  g_framework->ApplyWidgets();
+}
 
-  void CallOnDownloadCountryClicked(shared_ptr<jobject> const & obj,
-                                    storage::TIndex const & idx,
-                                    int options,
-                                    jmethodID methodID)
-  {
-    JNIEnv * env = jni::GetEnv();
-    env->CallVoidMethod(*obj.get(), methodID, idx.m_group, idx.m_country, idx.m_region, options);
-  }
+JNIEXPORT void JNICALL
+Java_com_mapswithme_maps_MapFragment_nativeCleanWidgets(JNIEnv * env, jclass clazz)
+{
+  g_framework->CleanWidgets();
+}
 
-  JNIEXPORT void JNICALL
-  Java_com_mapswithme_maps_MapFragment_nativeConnectDownloadButton(JNIEnv * env, jobject thiz)
-  {
-    CountryStatusDisplay * display = g_framework->GetCountryStatusDisplay();
-
-    jmethodID methodID = jni::GetJavaMethodID(env, thiz, "OnDownloadCountryClicked", "(IIII)V");
-
-    display->SetDownloadCountryListener(bind(&CallOnDownloadCountryClicked,
-                                              jni::make_global_ref(thiz),
-                                              _1,
-                                              _2,
-                                              methodID));
-  }
-
-  JNIEXPORT void JNICALL
-  Java_com_mapswithme_maps_MapFragment_nativeDownloadCountry(JNIEnv * env, jobject thiz, jobject idx, jint options)
-  {
-    storage::TIndex index = storage::ToNative(idx);
-    storage::ActiveMapsLayout & layout = storage_utils::GetMapLayout();
-    if (options == -1)
-      layout.RetryDownloading(index);
-    else
-      layout.DownloadMap(index, storage_utils::ToOptions(options));
-  }
-
-  JNIEXPORT void JNICALL
-  Java_com_mapswithme_maps_MapFragment_nativeScale(JNIEnv * env, jobject thiz, jdouble k)
-  {
-    g_framework->Scale(static_cast<double>(k));
-  }
-
-  JNIEXPORT jboolean JNICALL
-  Java_com_mapswithme_maps_MapFragment_showMapForUrl(JNIEnv * env, jobject thiz, jstring url)
-  {
-    return g_framework->ShowMapForURL(jni::ToNativeString(env, url));
-  }
 } // extern "C"

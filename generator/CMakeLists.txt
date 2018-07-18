@@ -1,0 +1,127 @@
+project(generator)
+
+include_directories(
+  ${OMIM_ROOT}/3party/gflags/src
+  ${OMIM_ROOT}/3party/jansson/src
+)
+
+set(SRC
+  altitude_generator.cpp
+  altitude_generator.hpp
+  booking_dataset.cpp
+  booking_dataset.hpp
+  booking_scoring.cpp
+  borders_generator.cpp
+  borders_generator.hpp
+  borders_loader.cpp
+  borders_loader.hpp
+  centers_table_builder.cpp
+  centers_table_builder.hpp
+  check_model.cpp
+  check_model.hpp
+  cities_boundaries_builder.cpp
+  cities_boundaries_builder.hpp
+  coastlines_generator.cpp
+  coastlines_generator.hpp
+  dumper.cpp
+  dumper.hpp
+  feature_builder.cpp
+  feature_builder.hpp
+  feature_emitter_iface.hpp
+  feature_generator.cpp
+  feature_generator.hpp
+  feature_helpers.cpp
+  feature_helpers.hpp
+  feature_merger.cpp
+  feature_merger.hpp
+  feature_sorter.cpp
+  feature_sorter.hpp
+  gen_mwm_info.hpp
+  generate_info.hpp
+  geometry_holder.hpp
+  intermediate_data.cpp
+  intermediate_data.hpp
+  intermediate_elements.hpp
+  locality_sorter.cpp
+  locality_sorter.hpp
+  metalines_builder.cpp
+  metalines_builder.hpp
+  node_mixer.hpp
+  node_mixer.cpp
+  opentable_dataset.cpp
+  opentable_dataset.hpp
+  opentable_scoring.cpp
+  osm2meta.cpp
+  osm2meta.hpp
+  osm2type.cpp
+  osm2type.hpp
+  osm_element.cpp
+  osm_element.hpp
+  osm_o5m_source.hpp
+  osm_source.cpp
+  osm_translator.hpp
+  osm_xml_source.hpp
+  polygonizer.hpp
+  popular_places_section_builder.cpp
+  popular_places_section_builder.hpp
+  region_meta.cpp
+  region_meta.hpp
+  restriction_collector.cpp
+  restriction_collector.hpp
+  restriction_generator.cpp
+  restriction_generator.hpp
+  restriction_writer.cpp
+  restriction_writer.hpp
+  road_access_generator.cpp
+  road_access_generator.hpp
+  routing_helpers.cpp
+  routing_helpers.hpp
+  routing_index_generator.cpp
+  routing_index_generator.hpp
+  search_index_builder.cpp
+  search_index_builder.hpp
+  sponsored_dataset.hpp
+  sponsored_dataset_inl.hpp
+  sponsored_object_storage.hpp
+  sponsored_scoring.cpp
+  sponsored_scoring.hpp
+  srtm_parser.cpp
+  srtm_parser.hpp
+  statistics.cpp
+  statistics.hpp
+  tag_admixer.hpp
+  tesselator.cpp
+  tesselator.hpp
+  towns_dumper.cpp
+  towns_dumper.hpp
+  traffic_generator.cpp
+  traffic_generator.hpp
+  transit_generator.cpp
+  transit_generator.hpp
+  ugc_db.cpp
+  ugc_db.hpp
+  ugc_section_builder.cpp
+  ugc_section_builder.hpp
+  ugc_translator.cpp
+  ugc_translator.hpp
+  unpack_mwm.cpp
+  unpack_mwm.hpp
+  utils.cpp
+  utils.hpp
+  viator_dataset.cpp
+  viator_dataset.hpp
+  ways_merger.hpp
+  world_map_generator.hpp
+)
+
+omim_add_library(${PROJECT_NAME} ${SRC})
+
+omim_add_test_subdirectory(generator_tests_support)
+omim_add_test_subdirectory(generator_tests)
+
+add_subdirectory(generator_tool)
+add_subdirectory(booking_quality_check)
+add_subdirectory(extract_addr)
+add_subdirectory(feature_segments_checker)
+add_subdirectory(restaurants_info)
+add_subdirectory(srtm_coverage_checker)

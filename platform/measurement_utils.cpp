@@ -1,19 +1,23 @@
 #include "platform/measurement_utils.hpp"
 #include "platform/settings.hpp"
 
-#include "indexer/mercator.hpp"
+#include "geometry/mercator.hpp"
 
-#include "base/string_utils.hpp"
+#include "base/macros.hpp"
 #include "base/math.hpp"
+#include "base/stl_add.hpp"
+#include "base/string_utils.hpp"
+#include "base/logging.hpp"
 
+#include "std/cstring.hpp"
 #include "std/iomanip.hpp"
 #include "std/sstream.hpp"
 
 
-using namespace Settings;
+using namespace settings;
 using namespace strings;
 
-namespace MeasurementUtils
+namespace measurement_utils
 {
 
 string ToStringPrecision(double d, int pr)
@@ -41,22 +45,26 @@ bool FormatDistanceImpl(double m, string & res,
     res = ToStringPrecision(v, v >= 10.0 ? 0 : 1) + high;
   }
   else
-    res = ToStringPrecision(lowV, 0) + low;
+  {
+    // To display unit number only if <= 100.
+    res = ToStringPrecision(lowV <= 100.0 ? lowV : round(lowV / 10) * 10, 0) + low;
+  }
 
   return true;
 }
 
 bool FormatDistance(double m, string & res)
 {
-  Units u = Metric;
-  (void)Get("Units", u);
+  auto units = Units::Metric;
+  TryGet(settings::kMeasurementUnits, units);
 
   /// @todo Put string units resources.
-  switch (u)
+  switch (units)
   {
-  case Foot: return FormatDistanceImpl(m, res, " mi", " ft", 1609.344, 0.3048);
-  default: return FormatDistanceImpl(m, res, " km", " m", 1000.0, 1.0);
+  case Units::Imperial: return FormatDistanceImpl(m, res, " mi", " ft", 1609.344, 0.3048);
+  case Units::Metric: return FormatDistanceImpl(m, res, " km", " m", 1000.0, 1.0);
   }
+  CHECK_SWITCH();
 }
 
 
@@ -132,6 +140,11 @@ string FormatLatLon(double lat, double lon, int dac)
   return to_string_dac(lat, dac) + " " + to_string_dac(lon, dac);
 }
 
+string FormatLatLon(double lat, double lon, bool withSemicolon, int dac)
+{
+  return to_string_dac(lat, dac) + (withSemicolon ? ", " : " ") + to_string_dac(lon, dac);
+}
+
 void FormatLatLon(double lat, double lon, string & latText, string & lonText, int dac)
 {
   latText = to_string_dac(lat, dac);
@@ -151,42 +164,137 @@ void FormatMercator(m2::PointD const & mercator, string & lat, string & lon, int
 
 string FormatAltitude(double altitudeInMeters)
 {
-  Units u = Metric;
-  (void)Get("Units", u);
+  Units units = Units::Metric;
+  TryGet(settings::kMeasurementUnits, units);
 
   ostringstream ss;
   ss << fixed << setprecision(0);
 
   /// @todo Put string units resources.
-  switch (u)
+  switch (units)
   {
-  case Foot: ss << MetersToFeet(altitudeInMeters) << "ft"; break;
-  default: ss << altitudeInMeters << "m"; break;
+  case Units::Imperial: ss << MetersToFeet(altitudeInMeters) << "ft"; break;
+  case Units::Metric: ss << altitudeInMeters << "m"; break;
   }
   return ss.str();
 }
 
-string FormatSpeed(double metersPerSecond)
+string FormatSpeedWithDeviceUnits(double metersPerSecond)
 {
-  Units u = Metric;
-  (void)Get("Units", u);
-
-  double perHour;
-  string res;
-
-  /// @todo Put string units resources.
-  switch (u)
-  {
-  case Foot:
-    perHour = metersPerSecond * 3600. / 1609.344;
-    res = ToStringPrecision(perHour, perHour >= 10.0 ? 0 : 1) + "mph";
-    break;
-  default:
-    perHour = metersPerSecond * 3600. / 1000.;
-    res = ToStringPrecision(perHour, perHour >= 10.0 ? 0 : 1) + "km/h";
-    break;
-  }
-  return res;
+  auto units = Units::Metric;
+  TryGet(settings::kMeasurementUnits, units);
+  return FormatSpeedWithUnits(metersPerSecond, units);
 }
 
-} // namespace MeasurementUtils
+string FormatSpeedWithUnits(double metersPerSecond, Units units)
+{
+  return FormatSpeed(metersPerSecond, units) + FormatSpeedUnits(units);
+}
+
+string FormatSpeed(double metersPerSecond, Units units)
+{
+  double constexpr kSecondsPerHour = 3600;
+  double constexpr metersPerKilometer = 1000;
+  double unitsPerHour;
+  switch (units)
+  {
+  case Units::Imperial: unitsPerHour = MetersToMiles(metersPerSecond) * kSecondsPerHour; break;
+  case Units::Metric: unitsPerHour = metersPerSecond * kSecondsPerHour / metersPerKilometer; break;
+  }
+  return ToStringPrecision(unitsPerHour, unitsPerHour >= 10.0 ? 0 : 1);
+}
+
+string FormatSpeedUnits(Units units)
+{
+  switch (units)
+  {
+  case Units::Imperial: return "mph";
+  case Units::Metric: return "km/h";
+  }
+  CHECK_SWITCH();
+}
+
+bool OSMDistanceToMeters(string const & osmRawValue, double & outMeters)
+{
+  char * stop;
+  char const * s = osmRawValue.c_str();
+  outMeters = strtod(s, &stop);
+
+  // Not a number, was not parsed at all.
+  if (s == stop)
+    return false;
+
+  if (!isfinite(outMeters))
+    return false;
+
+  switch (*stop)
+  {
+  // Default units - meters.
+  case 0: return true;
+
+  // Feet and probably inches.
+  case '\'':
+    {
+      outMeters = FeetToMeters(outMeters);
+      s = stop + 1;
+      double const inches = strtod(s, &stop);
+      if (s != stop && *stop == '"' && isfinite(inches))
+        outMeters += InchesToMeters(inches);
+      return true;
+    }
+    break;
+
+  // Inches.
+  case '\"': outMeters = InchesToMeters(outMeters); return true;
+
+  // It's probably a range. Use maximum value (if possible) for a range.
+  case '-':
+    {
+      s = stop + 1;
+      double const newValue = strtod(s, &stop);
+      if (s != stop && isfinite(newValue))
+        outMeters = newValue;
+    }
+    break;
+
+  // It's probably a list. We don't support them.
+  case ';': return false;
+  }
+
+  while (*stop && isspace(*stop))
+    ++stop;
+
+  // Default units - meters.
+  if (*stop == 0)
+    return true;
+
+  if (strstr(stop, "nmi") == stop)
+    outMeters = NauticalMilesToMeters(outMeters);
+  else if (strstr(stop, "mi") == stop)
+    outMeters = MilesToMeters(outMeters);
+  else if (strstr(stop, "ft") == stop)
+    outMeters = FeetToMeters(outMeters);
+  else if (strstr(stop, "feet") == stop)
+    outMeters = FeetToMeters(outMeters);
+  else if (strstr(stop, "km") == stop)
+    outMeters = outMeters * 1000;
+
+  // Count all other cases as meters.
+  return true;
+}
+
+string OSMDistanceToMetersString(string const & osmRawValue,
+                                 bool supportZeroAndNegativeValues,
+                                 int digitsAfterComma)
+{
+  double meters;
+  if (OSMDistanceToMeters(osmRawValue, meters))
+  {
+    if (!supportZeroAndNegativeValues && meters <= 0)
+      return {};
+    return strings::to_string_dac(meters, digitsAfterComma);
+  }
+  return {};
+}
+
+}  // namespace measurement_utils

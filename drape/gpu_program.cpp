@@ -1,85 +1,63 @@
 #include "drape/gpu_program.hpp"
 #include "drape/glfunctions.hpp"
+#include "drape/glstate.hpp"
+#include "drape/support_manager.hpp"
 
-#include "base/assert.hpp"
 #include "base/logging.hpp"
 
-#ifdef DEBUG
-  #include "../std/map.hpp"
-#endif
+#include <set>
 
 namespace dp
 {
-
-#ifdef DEBUG
-  class UniformValidator
-  {
-  private:
-    uint32_t m_programID;
-    map<string, UniformTypeAndSize> m_uniformsMap;
-
-  public:
-    UniformValidator(uint32_t programId)
-      : m_programID(programId)
-    {
-      int32_t numberOfUnis = GLFunctions::glGetProgramiv(m_programID, gl_const::GLActiveUniforms);
-      for (size_t unIndex = 0; unIndex < numberOfUnis; ++unIndex)
-      {
-        string name;
-        glConst type;
-        UniformSize size;
-        GLCHECK(GLFunctions::glGetActiveUniform(m_programID, unIndex, &size, &type, name));
-        m_uniformsMap[name] = make_pair(type, size);
-      }
-    }
-
-    bool HasValidTypeAndSizeForName(string const & name, glConst type, UniformSize size)
-    {
-      map<string, UniformTypeAndSize>::iterator it = m_uniformsMap.find(name);
-      if (it != m_uniformsMap.end())
-      {
-        UniformTypeAndSize actualParams = (*it).second;
-        return type == actualParams.first && size == actualParams.second;
-      }
-      else
-        return false;
-    }
-  };
-
-  bool GpuProgram::HasUniform(string const & name, glConst type, UniformSize size)
-  {
-    return m_validator->HasValidTypeAndSizeForName(name, type, size);
-  }
-#endif // UniformValidator
-
-
-GpuProgram::GpuProgram(RefPointer<Shader> vertexShader, RefPointer<Shader> fragmentShader)
+GpuProgram::GpuProgram(std::string const & programName,
+                       ref_ptr<Shader> vertexShader, ref_ptr<Shader> fragmentShader)
+  : m_programName(programName)
+  , m_vertexShader(vertexShader)
+  , m_fragmentShader(fragmentShader)
 {
   m_programID = GLFunctions::glCreateProgram();
-  GLFunctions::glAttachShader(m_programID, vertexShader->GetID());
-  GLFunctions::glAttachShader(m_programID, fragmentShader->GetID());
+  GLFunctions::glAttachShader(m_programID, m_vertexShader->GetID());
+  GLFunctions::glAttachShader(m_programID, m_fragmentShader->GetID());
 
-  string errorLog;
+  std::string errorLog;
   if (!GLFunctions::glLinkProgram(m_programID, errorLog))
-    LOG(LINFO, ("Program ", m_programID, " link error = ", errorLog));
+    LOG(LERROR, ("Program ", programName, " link error = ", errorLog));
 
-  GLFunctions::glDetachShader(m_programID, vertexShader->GetID());
-  GLFunctions::glDetachShader(m_programID, fragmentShader->GetID());
+  // On Tegra3 glGetActiveUniform isn't work if you detach shaders after linking.
+  LoadUniformLocations();
 
-
-#ifdef DEBUG
-  m_validator.reset(new UniformValidator(m_programID));
-#endif
+  // On Tegra2 we cannot detach shaders at all.
+  // https://devtalk.nvidia.com/default/topic/528941/alpha-blending-not-working-on-t20-and-t30-under-ice-cream-sandwich/
+  if (!SupportManager::Instance().IsTegraDevice())
+  {
+    GLFunctions::glDetachShader(m_programID, m_vertexShader->GetID());
+    GLFunctions::glDetachShader(m_programID, m_fragmentShader->GetID());
+  }
 }
 
 GpuProgram::~GpuProgram()
 {
   Unbind();
+
+  if (SupportManager::Instance().IsTegraDevice())
+  {
+    GLFunctions::glDetachShader(m_programID, m_vertexShader->GetID());
+    GLFunctions::glDetachShader(m_programID, m_fragmentShader->GetID());
+  }
+
   GLFunctions::glDeleteProgram(m_programID);
 }
 
 void GpuProgram::Bind()
 {
+  // Deactivate all unused textures.
+  uint8_t const usedSlots = TextureState::GetLastUsedSlots();
+  for (uint8_t i = m_textureSlotsCount; i < usedSlots; i++)
+  {
+    GLFunctions::glActiveTexture(gl_const::GLTexture0 + i);
+    GLFunctions::glBindTexture(0);
+  }
+
   GLFunctions::glUseProgram(m_programID);
 }
 
@@ -88,14 +66,66 @@ void GpuProgram::Unbind()
   GLFunctions::glUseProgram(0);
 }
 
-int8_t GpuProgram::GetAttributeLocation(string const & attributeName) const
+int8_t GpuProgram::GetAttributeLocation(std::string const & attributeName) const
 {
   return GLFunctions::glGetAttribLocation(m_programID, attributeName);
 }
 
-int8_t GpuProgram::GetUniformLocation(string const & uniformName) const
+int8_t GpuProgram::GetUniformLocation(std::string const & uniformName) const
 {
-  return GLFunctions::glGetUniformLocation(m_programID, uniformName);
+  auto const it = m_uniforms.find(uniformName);
+  if (it == m_uniforms.end())
+    return -1;
+
+  return it->second.m_location;
 }
 
-} // namespace dp
+glConst GpuProgram::GetUniformType(std::string const & uniformName) const
+{
+  auto const it = m_uniforms.find(uniformName);
+  if (it == m_uniforms.end())
+    return -1;
+
+  return it->second.m_type;
+}
+
+GpuProgram::UniformsInfo const & GpuProgram::GetUniformsInfo() const
+{
+  return m_uniforms;
+}
+
+void GpuProgram::LoadUniformLocations()
+{
+  static std::set<glConst> const kSupportedTypes = {
+      gl_const::GLFloatType, gl_const::GLFloatVec2, gl_const::GLFloatVec3, gl_const::GLFloatVec4,
+      gl_const::GLIntType,   gl_const::GLIntVec2,   gl_const::GLIntVec3,   gl_const::GLIntVec4,
+      gl_const::GLFloatMat4, gl_const::GLSampler2D};
+
+  auto const uniformsCount = GLFunctions::glGetProgramiv(m_programID, gl_const::GLActiveUniforms);
+  for (int i = 0; i < uniformsCount; ++i)
+  {
+    int32_t size = 0;
+    UniformInfo info;
+    std::string name;
+    GLFunctions::glGetActiveUniform(m_programID, static_cast<uint32_t>(i), &size, &info.m_type, name);
+    CHECK(kSupportedTypes.find(info.m_type) != kSupportedTypes.cend(),
+          ("Used uniform has unsupported type. Program =", m_programName, "Type =", info.m_type));
+
+    info.m_location = GLFunctions::glGetUniformLocation(m_programID, name);
+    m_uniforms[name] = std::move(info);
+  }
+  m_numericUniformsCount = CalculateNumericUniformsCount();
+  m_textureSlotsCount = static_cast<uint8_t>(m_uniforms.size() - m_numericUniformsCount);
+}
+
+uint32_t GpuProgram::CalculateNumericUniformsCount() const
+{
+  uint32_t counter = 0;
+  for (auto const & u : m_uniforms)
+  {
+    if (u.second.m_type != gl_const::GLSampler2D)
+      counter++;
+  }
+  return counter;
+}
+}  // namespace dp

@@ -1,3 +1,0 @@
-@interface MWMSearchContentView : UIView
-
-@end

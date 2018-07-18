@@ -1,6 +1,6 @@
 United Kingdom: UK
 
-United States of America: US, USA
+United States of America: US, USA, США
 Alabama: AL
 Alaska: AK
 Arizona: AZ
@@ -54,15 +54,17 @@ Wyoming: WY
 
 
 Alberta: AB
-British Columbia:	BC
+British Columbia: BC
 Manitoba: MB
 New Brunswick: NB
 Newfoundland and Labrador: NL
-Northwest Territories	NT
+Northwest Territories: NT
 Nova Scotia: NS
-Nunavut	NU
+Nunavut: NU
 Ontario: ON
-Prince Edward Island:	PE
+Prince Edward Island: PE
 Quebec: QC
-Saskatchewan:	SK
-Yukon	YT
+Saskatchewan: SK
+Yukon: YT
+
+Россия: РФ

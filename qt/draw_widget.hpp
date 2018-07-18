@@ -1,160 +1,121 @@
 #pragma once
 
-#include "map/framework.hpp"
-#include "map/navigator.hpp"
-#include "map/qgl_render_context.hpp"
+#include "qt/qt_common/map_widget.hpp"
 
-#include "render/window_handle.hpp"
+#include "map/everywhere_search_params.hpp"
+#include "map/place_page_info.hpp"
+#include "map/routing_manager.hpp"
 
-#include "platform/video_timer.hpp"
+#include "search/result.hpp"
 
-#include "base/deferred_task.hpp"
+#include "routing/router.hpp"
 
+#include "drape_frontend/gui/skin.hpp"
+
+#include "drape_frontend/drape_engine.hpp"
+
+#include "std/condition_variable.hpp"
+#include "std/mutex.hpp"
 #include "std/unique_ptr.hpp"
 
-#include <QtCore/QTimer>
-#include <QtOpenGL/qgl.h>
+#include <QtWidgets/QRubberBand>
 
+class Framework;
+class QQuickWindow;
 
 namespace qt
 {
-  class QScaleSlider;
-
-  class DrawWidget;
-
-  class QtVideoTimer : public QObject, public ::VideoTimer
-  {
-    Q_OBJECT
-  private:
-    QTimer * m_timer;
-
-  public:
-    QtVideoTimer(::VideoTimer::TFrameFn frameFn);
-
-    void resume();
-    void pause();
-
-    void start();
-    void stop();
-
-  protected:
-    Q_SLOT void TimerElapsed();
-  };
-
-  class DrawWidget : public QGLWidget
-  {
-    bool m_isInitialized;
-    bool m_isTimerStarted;
-
-    unique_ptr<Framework> m_framework;
-    unique_ptr<VideoTimer> m_videoTimer;
-
-    bool m_isDrag;
-    bool m_isRotate;
-
-    //QTimer * m_timer;
-    //QTimer * m_animTimer;
-    //size_t m_redrawInterval;
-
-    qreal m_ratio;
-
-    inline int L2D(int px) const { return px * m_ratio; }
-    inline m2::PointD GetDevicePoint(QMouseEvent * e) const;
-    DragEvent GetDragEvent(QMouseEvent * e) const;
-    RotateEvent GetRotateEvent(QPoint const & pt) const;
-
-    Q_OBJECT
-
-  public Q_SLOTS:
-    void MoveLeft();
-    void MoveRight();
-    void MoveUp();
-    void MoveDown();
-
-    void ScalePlus();
-    void ScaleMinus();
-    void ScalePlusLight();
-    void ScaleMinusLight();
-
-    void ShowAll();
-    void Repaint();
-    void ScaleChanged(int action);
-    //void ScaleTimerElapsed();
-
-    void QueryMaxScaleMode();
-
-  public:
-    DrawWidget(QWidget * pParent);
-    ~DrawWidget();
-
-    void SetScaleControl(QScaleSlider * pScale);
-
-    bool Search(search::SearchParams params);
-    string GetDistance(search::Result const & res) const;
-    void ShowSearchResult(search::Result const & res);
-    void CloseSearch();
-
-    void OnLocationUpdate(location::GpsInfo const & info);
-
-    void SaveState();
-    void LoadState();
-
-    void UpdateNow();
-    void UpdateAfterSettingsChanged();
-
-    void PrepareShutdown();
-
-    Framework & GetFramework() { return *m_framework.get(); }
-
-    void SetMapStyle(MapStyle mapStyle);
-
-    void SetRouter(routing::RouterType routerType);
-
-  protected:
-    VideoTimer * CreateVideoTimer();
-
-  protected:
-    void StartPressTask(m2::PointD const & pt, unsigned ms);
-    void KillPressTask();
-    void OnPressTaskEvent(m2::PointD const & pt, unsigned ms);
-    void OnActivateMark(unique_ptr<UserMarkCopy> pCopy);
-
-  protected:
-    /// @name Overriden from base_type.
-    //@{
-    virtual void initializeGL();
-    virtual void resizeGL(int w, int h);
-    virtual void paintGL();
-    //@}
-
-    void DrawFrame();
-
-    /// @name Overriden from QWidget.
-    //@{
-    virtual void mousePressEvent(QMouseEvent * e);
-    virtual void mouseDoubleClickEvent(QMouseEvent * e);
-    virtual void mouseMoveEvent(QMouseEvent * e);
-    virtual void mouseReleaseEvent(QMouseEvent * e);
-    virtual void wheelEvent(QWheelEvent * e);
-    virtual void keyReleaseEvent(QKeyEvent * e);
-    //@}
-
-  private:
-    void UpdateScaleControl();
-    void StopDragging(QMouseEvent * e);
-    void StopRotating(QMouseEvent * e);
-    void StopRotating(QKeyEvent * e);
-
-    QScaleSlider * m_pScale;
-
-    unique_ptr<DeferredTask> m_deferredTask;
-    m2::PointD m_taskPoint;
-    bool m_wasLongClick, m_isCleanSingleClick;
-
-    bool m_emulatingLocation;
-
-    PinClickManager & GetBalloonManager() { return m_framework->GetBalloonManager(); }
-
-    void InitRenderPolicy();
-  };
+namespace common
+{
+class ScaleSlider;
 }
+
+class DrawWidget : public qt::common::MapWidget
+{
+  using TBase = MapWidget;
+
+  Q_OBJECT
+
+public Q_SLOTS:
+  void ShowAll();
+
+  void ChoosePositionModeEnable();
+  void ChoosePositionModeDisable();
+  void OnUpdateCountryStatusByTimer();
+
+public:
+  DrawWidget(Framework & framework, bool apiOpenGLES3, QWidget * parent);
+  ~DrawWidget();
+
+  bool Search(search::EverywhereSearchParams const & params);
+  string GetDistance(search::Result const & res) const;
+  void ShowSearchResult(search::Result const & res);
+
+  void CreateFeature();
+
+  void OnLocationUpdate(location::GpsInfo const & info);
+
+  void UpdateAfterSettingsChanged();
+
+  void PrepareShutdown();
+
+  Framework & GetFramework() { return m_framework; }
+
+  void SetMapStyle(MapStyle mapStyle);
+
+  void SetRouter(routing::RouterType routerType);
+
+  using TCurrentCountryChanged = function<void(storage::TCountryId const &, string const &,
+                                               storage::Status, uint64_t, uint8_t)>;
+  void SetCurrentCountryChangedListener(TCurrentCountryChanged const & listener);
+
+  void DownloadCountry(storage::TCountryId const & countryId);
+  void RetryToDownloadCountry(storage::TCountryId const & countryId);
+
+  void SetSelectionMode(bool mode);
+  void SetCityBoundariesSelectionMode(bool mode);
+
+  RouteMarkType GetRoutePointAddMode() const { return m_routePointAddMode; }
+  void SetRoutePointAddMode(RouteMarkType mode) { m_routePointAddMode = mode; }
+  void FollowRoute();
+  void ClearRoute();
+  void OnRouteRecommendation(RoutingManager::Recommendation recommendation);
+
+  void RefreshDrawingRules();
+
+  static void SetDefaultSurfaceFormat(bool apiOpenGLES3);
+
+protected:
+  /// @name Overriden from MapWidget.
+  //@{
+  void initializeGL() override;
+
+  void mousePressEvent(QMouseEvent * e) override;
+  void mouseMoveEvent(QMouseEvent * e) override;
+  void mouseReleaseEvent(QMouseEvent * e) override;
+  void keyPressEvent(QKeyEvent * e) override;
+  void keyReleaseEvent(QKeyEvent * e) override;
+  //@}
+
+private:
+  void SubmitFakeLocationPoint(m2::PointD const & pt);
+  void SubmitRoutingPoint(m2::PointD const & pt);
+  void SubmitBookmark(m2::PointD const & pt);
+  void ShowInfoPopup(QMouseEvent * e, m2::PointD const & pt);
+  void ShowPlacePage(place_page::Info const & info);
+
+  void UpdateCountryStatus(storage::TCountryId const & countryId);
+
+  QRubberBand * m_rubberBand;
+  QPoint m_rubberBandOrigin;
+
+  bool m_emulatingLocation;
+
+  TCurrentCountryChanged m_currentCountryChanged;
+  storage::TCountryId m_countryId;
+
+  bool m_selectionMode = false;
+  bool m_cityBoundariesSelectionMode = false;
+  RouteMarkType m_routePointAddMode = RouteMarkType::Finish;
+};
+}  // namespace qt

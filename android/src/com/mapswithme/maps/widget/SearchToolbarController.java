@@ -1,29 +1,30 @@
 package com.mapswithme.maps.widget;
 
 import android.app.Activity;
+import android.content.ActivityNotFoundException;
+import android.content.Intent;
+import android.support.annotation.StringRes;
 import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
 import android.widget.EditText;
-import android.widget.TextView;
 
 import com.mapswithme.maps.R;
 import com.mapswithme.util.InputUtils;
 import com.mapswithme.util.StringUtils;
 import com.mapswithme.util.UiUtils;
+import com.mapswithme.util.statistics.AlohaHelper;
 
 public class SearchToolbarController extends ToolbarController
                                   implements View.OnClickListener
 {
-  public interface Container
-  {
-    SearchToolbarController getController();
-  }
+  private static final int REQUEST_VOICE_RECOGNITION = 0xCA11;
 
+  private final View mContainer;
   private final EditText mQuery;
-  private final View mProgress;
+  protected final View mProgress;
   private final View mClear;
   private final View mVoiceInput;
 
@@ -39,34 +40,38 @@ public class SearchToolbarController extends ToolbarController
     }
   };
 
+  public interface Container
+  {
+    SearchToolbarController getController();
+  }
+
   public SearchToolbarController(View root, Activity activity)
   {
     super(root, activity);
 
-    mQuery = (EditText) mToolbar.findViewById(R.id.query);
+    mContainer = mToolbar.findViewById(R.id.frame);
+
+    mQuery = mContainer.findViewById(R.id.query);
     mQuery.setOnClickListener(this);
     mQuery.addTextChangedListener(mTextWatcher);
-    mQuery.setOnEditorActionListener(new TextView.OnEditorActionListener()
-    {
-      @Override
-      public boolean onEditorAction(TextView v, int actionId, KeyEvent event)
-      {
-        boolean isSearchDown = (event != null &&
-                                event.getAction() == KeyEvent.ACTION_DOWN &&
-                                event.getKeyCode() == KeyEvent.KEYCODE_SEARCH);
+    mQuery.setOnEditorActionListener(
+        (v, actionId, event) ->
+        {
+          boolean isSearchDown = (event != null &&
+                                  event.getAction() == KeyEvent.ACTION_DOWN &&
+                                  event.getKeyCode() == KeyEvent.KEYCODE_SEARCH);
 
-        boolean isSearchAction = (actionId == EditorInfo.IME_ACTION_SEARCH);
+          boolean isSearchAction = (actionId == EditorInfo.IME_ACTION_SEARCH);
 
-        return (isSearchDown || isSearchAction) && onStartSearchClick();
-      }
-    });
+          return (isSearchDown || isSearchAction) && onStartSearchClick();
+        });
 
-    mProgress = mToolbar.findViewById(R.id.progress);
+    mProgress = mContainer.findViewById(R.id.progress);
 
-    mVoiceInput = mToolbar.findViewById(R.id.voice_input);
+    mVoiceInput = mContainer.findViewById(R.id.voice_input);
     mVoiceInput.setOnClickListener(this);
 
-    mClear = mToolbar.findViewById(R.id.clear);
+    mClear = mContainer.findViewById(R.id.clear);
     mClear.setOnClickListener(this);
 
     showProgress(false);
@@ -75,7 +80,7 @@ public class SearchToolbarController extends ToolbarController
 
   private void updateButtons(boolean queryEmpty)
   {
-    UiUtils.showIf(queryEmpty && mVoiceInputSupported, mVoiceInput);
+    UiUtils.showIf(supportsVoiceSearch() && queryEmpty && mVoiceInputSupported, mVoiceInput);
     UiUtils.showIf(!queryEmpty, mClear);
   }
 
@@ -93,24 +98,55 @@ public class SearchToolbarController extends ToolbarController
     clear();
   }
 
-  protected void onVoiceInputClick() {}
+  protected void startVoiceRecognition(Intent intent, int code)
+  {
+    throw new RuntimeException("To be used startVoiceRecognition() must be implemented by descendant class");
+  }
+
+  /**
+   * Return true to display & activate voice search. Turned OFF by default.
+   */
+  protected boolean supportsVoiceSearch()
+  {
+    return false;
+  }
+
+  private void onVoiceInputClick()
+  {
+    try
+    {
+      startVoiceRecognition(InputUtils.createIntentForVoiceRecognition(mActivity.getString(getVoiceInputPrompt())), REQUEST_VOICE_RECOGNITION);
+    } catch (ActivityNotFoundException e)
+    {
+      AlohaHelper.logException(e);
+    }
+  }
+
+  protected @StringRes int getVoiceInputPrompt()
+  {
+    return R.string.search;
+  }
 
   public String getQuery()
   {
-    return mQuery.getText().toString().trim();
+    return (UiUtils.isVisible(mContainer) ? mQuery.getText().toString() : "");
   }
 
   public void setQuery(CharSequence query)
   {
-    final String text = query.toString().trim();
-    mQuery.setText(text);
-    if (!TextUtils.isEmpty(text))
-      mQuery.selectAll();
+    mQuery.setText(query);
+    if (!TextUtils.isEmpty(query))
+      mQuery.setSelection(query.length());
   }
 
   public void clear()
   {
     setQuery("");
+  }
+
+  public boolean hasQuery()
+  {
+    return !getQuery().isEmpty();
   }
 
   public void activate()
@@ -135,17 +171,37 @@ public class SearchToolbarController extends ToolbarController
   {
     switch (v.getId())
     {
-      case R.id.query:
-        onQueryClick(getQuery());
-        break;
+    case R.id.query:
+      onQueryClick(getQuery());
+      break;
 
-      case R.id.clear:
-        onClearClick();
-        break;
+    case R.id.clear:
+      onClearClick();
+      break;
 
-      case R.id.voice_input:
-        onVoiceInputClick();
-        break;
+    case R.id.voice_input:
+      onVoiceInputClick();
+      break;
     }
+  }
+
+  public void showControls(boolean show)
+  {
+    UiUtils.showIf(show, mContainer);
+  }
+
+  public void onActivityResult(int requestCode, int resultCode, Intent data)
+  {
+    if (requestCode == REQUEST_VOICE_RECOGNITION && resultCode == Activity.RESULT_OK)
+    {
+      String result = InputUtils.getBestRecognitionResult(data);
+      if (!TextUtils.isEmpty(result))
+        setQuery(result);
+    }
+  }
+
+  public void setHint(@StringRes int hint)
+  {
+    mQuery.setHint(hint);
   }
 }

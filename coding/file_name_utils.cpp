@@ -12,6 +12,12 @@ void GetNameWithoutExt(string & name)
     name.erase(i);
 }
 
+string FilenameWithoutExt(string name)
+{
+  GetNameWithoutExt(name);
+  return name;
+}
+
 string GetFileExtension(string const & name)
 {
   size_t const pos = name.find_last_of("./\\");
@@ -23,6 +29,14 @@ void GetNameFromFullPath(string & name)
   string::size_type const i = name.find_last_of("/\\");
   if (i != string::npos)
     name = name.substr(i+1);
+}
+
+string GetNameFromFullPathWithoutExt(string const & path)
+{
+  string name = path;
+  GetNameFromFullPath(name);
+  GetNameWithoutExt(name);
+  return name;
 }
 
 string GetDirectory(string const & name)

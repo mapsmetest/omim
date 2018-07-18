@@ -449,7 +449,7 @@ struct devarianted_wkt<variant<BOOST_VARIANT_ENUM_PARAMS(T)> >
         variant<BOOST_VARIANT_ENUM_PARAMS(T)> const& geometry
     )
     {
-        apply_visitor(visitor<OutputStream>(os), geometry);
+        boost::apply_visitor(visitor<OutputStream>(os), geometry);
     }
 };
 
@@ -501,7 +501,7 @@ private:
 template <typename Geometry>
 inline wkt_manipulator<Geometry> wkt(Geometry const& geometry)
 {
-    concept::check<Geometry const>();
+    concepts::check<Geometry const>();
 
     return wkt_manipulator<Geometry>(geometry);
 }

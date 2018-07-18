@@ -3,20 +3,22 @@
 #include "generator/osm_element.hpp"
 
 #include "indexer/classificator.hpp"
+#include "indexer/feature_impl.hpp"
 #include "indexer/feature_visibility.hpp"
-#include "indexer/mercator.hpp"
+
+#include "geometry/mercator.hpp"
 
 #include "base/assert.hpp"
+#include "base/stl_add.hpp"
 #include "base/string_utils.hpp"
-#include "base/math.hpp"
 
-#include "std/vector.hpp"
-#include "std/bind.hpp"
-#include "std/function.hpp"
-#include "std/initializer_list.hpp"
+#include <cstdint>
+#include <functional>
+#include <initializer_list>
+#include <set>
+#include <vector>
 
-#include <QtCore/QString>
-
+using namespace std;
 
 namespace ftype
 {
@@ -44,6 +46,8 @@ namespace ftype
           {"proposed", true},
           // [highway=primary][construction=primary] parsed as [highway=construction]
           {"construction", true},
+          // [wheelchair=no] should be processed
+          {"wheelchair", false},
           // process in any case
           {"layer", false},
           // process in any case
@@ -134,6 +138,10 @@ namespace ftype
         ++token;
         lang = (token ? *token : "default");
 
+        // Do not consider languages with suffixes, like "en:pronunciation".
+        if (++token)
+          return false;
+
         // Replace dummy arabian tag with correct tag.
         if (lang == "ar1")
           lang = "ar";
@@ -148,12 +156,7 @@ namespace ftype
         if (v.empty() || !GetLangByKey(k, lang))
           return false;
 
-        // Unicode Compatibility Decomposition,
-        // followed by Canonical Composition (NFKC).
-        // Needed for better search matching
-        QByteArray const normBytes = QString::fromUtf8(
-              v.c_str()).normalized(QString::NormalizationForm_KC).toUtf8();
-        m_params.AddName(lang, normBytes.constData());
+        m_params.AddName(lang, v);
         k.clear();
         v.clear();
         return false;
@@ -193,7 +196,7 @@ namespace ftype
         {
           for (auto const & rule: rules)
           {
-            if (strcmp(e.key.data(), rule.key) != 0)
+            if (e.key != rule.key)
               continue;
             bool take = false;
             if (rule.value[0] == '*')
@@ -221,25 +224,30 @@ namespace ftype
 
   public:
     enum EType { ENTRANCE, HIGHWAY, ADDRESS, ONEWAY, PRIVATE, LIT, NOFOOT, YESFOOT,
-                 RW_STATION, RW_STATION_SUBWAY };
+                 NOBICYCLE, YESBICYCLE, BICYCLE_BIDIR, SURFPGOOD, SURFPBAD, SURFUGOOD, SURFUBAD,
+                 HASPARTS, NOCAR, YESCAR, WLAN, RW_STATION, RW_STATION_SUBWAY, WHEELCHAIR_YES,
+                 BARRIER_GATE, TOLL
+               };
 
     CachedTypes()
     {
       Classificator const & c = classif();
-      
-      for (auto const & e : (StringIL[]) { {"entrance"}, {"highway"} })
-        m_types.push_back(c.GetTypeByPath(e));
 
-      StringIL arr[] =
+      my::StringIL arr[] =
       {
+        {"entrance"}, {"highway"},
         {"building", "address"}, {"hwtag", "oneway"}, {"hwtag", "private"},
-        {"hwtag", "lit"}, {"hwtag", "nofoot"}, {"hwtag", "yesfoot"}
+        {"hwtag", "lit"}, {"hwtag", "nofoot"}, {"hwtag", "yesfoot"},
+        {"hwtag", "nobicycle"}, {"hwtag", "yesbicycle"}, {"hwtag", "bidir_bicycle"},
+        {"psurface", "paved_good"}, {"psurface", "paved_bad"},
+        {"psurface", "unpaved_good"}, {"psurface", "unpaved_bad"},
+        {"building", "has_parts"}, {"hwtag", "nocar"}, {"hwtag", "yescar"},
+        {"internet_access", "wlan"}, {"railway", "station"}, {"railway", "station", "subway"},
+        {"wheelchair", "yes"}, {"barrier", "gate"}, {"hwtag", "toll"}
       };
+
       for (auto const & e : arr)
         m_types.push_back(c.GetTypeByPath(e));
-
-      m_types.push_back(c.GetTypeByPath({ "railway", "station" }));
-      m_types.push_back(c.GetTypeByPath({ "railway", "station", "subway" }));
     }
 
     uint32_t Get(EType t) const { return m_types[t]; }
@@ -249,10 +257,12 @@ namespace ftype
       ftype::TruncValue(t, 1);
       return t == Get(HIGHWAY);
     }
+
     bool IsRwStation(uint32_t t) const
     {
       return t == Get(RW_STATION);
     }
+
     bool IsRwSubway(uint32_t t) const
     {
       ftype::TruncValue(t, 3);
@@ -301,13 +311,15 @@ namespace ftype
         current = path.back().get();
 
         // Next objects trying to find by value first.
-        ClassifObjectPtr pObj =
-            ForEachTagEx<ClassifObjectPtr>(p, skipRows, [&](string const & k, string const & v)
-            {
-              if (!NeedMatchValue(k, v))
-                return ClassifObjectPtr(0, 0);
-              return current->BinaryFind(v);
-            });
+        // Prevent merging different tags (e.g. shop=pet from shop=abandoned, was:shop=pet).
+       ClassifObjectPtr pObj =
+           path.size() == 1 ? ClassifObjectPtr()
+                            : ForEachTagEx<ClassifObjectPtr>(
+                                  p, skipRows, [&current](string const & k, string const & v) {
+                                    if (!NeedMatchValue(k, v))
+                                      return ClassifObjectPtr();
+                                    return current->BinaryFind(v);
+                                  });
 
         if (pObj)
         {
@@ -336,22 +348,30 @@ namespace ftype
   string MatchCity(OsmElement const * p)
   {
     static map<string, m2::RectD> const cities = {
+        {"almaty", {76.7223358154, 43.1480920701, 77.123336792, 43.4299852362}},
         {"amsterdam", {4.65682983398, 52.232846171, 5.10040283203, 52.4886341706}},
         {"baires", {-58.9910888672, -35.1221551064, -57.8045654297, -34.2685661867}},
+        {"bangkok", {100.159606934, 13.4363737155, 100.909423828, 14.3069694978}},
         {"barcelona", {1.94458007812, 41.2489025224, 2.29614257812, 41.5414776668}},
         {"beijing", {115.894775391, 39.588757277, 117.026367187, 40.2795256688}},
         {"berlin", {13.0352783203, 52.3051199211, 13.7933349609, 52.6963610783}},
+        {"boston", {-71.2676239014, 42.2117365893, -70.8879089355, 42.521711682}},
         {"brussel", {4.2448425293, 50.761653413, 4.52499389648, 50.9497757762}},
         {"budapest", {18.7509155273, 47.3034470439, 19.423828125, 47.7023684666}},
         {"chicago", {-88.3163452148, 41.3541338721, -87.1270751953, 42.2691794924}},
         {"delhi", {76.8026733398, 28.3914003758, 77.5511169434, 28.9240352884}},
         {"dnepro", {34.7937011719, 48.339820521, 35.2798461914, 48.6056737841}},
+        {"dubai", {55.01953125, 24.9337667594, 55.637512207, 25.6068559937}},
         {"ekb", {60.3588867188, 56.6622647682, 61.0180664062, 57.0287738515}},
         {"frankfurt", {8.36334228516, 49.937079757, 8.92364501953, 50.2296379179}},
+        {"guangzhou", {112.560424805, 22.4313401564, 113.766174316, 23.5967112789}},
         {"hamburg", {9.75860595703, 53.39151869, 10.2584838867, 53.6820686709}},
         {"helsinki", {24.3237304688, 59.9989861206, 25.48828125, 60.44638186}},
+        {"hongkong", {114.039459229, 22.1848617608, 114.305877686, 22.3983322415}},
         {"kazan", {48.8067626953, 55.6372985742, 49.39453125, 55.9153515154}},
         {"kiev", {30.1354980469, 50.2050332649, 31.025390625, 50.6599083609}},
+        {"koln", {6.7943572998, 50.8445380881, 7.12669372559, 51.0810964366}},
+        {"lima", {-77.2750854492, -12.3279274859, -76.7999267578, -11.7988014362}},
         {"lisboa", {-9.42626953125, 38.548165423, -8.876953125, 38.9166815364}},
         {"london", {-0.4833984375, 51.3031452592, 0.2197265625, 51.6929902115}},
         {"madrid", {-4.00451660156, 40.1536868578, -3.32885742188, 40.6222917831}},
@@ -359,6 +379,7 @@ namespace ftype
         {"milan", {9.02252197266, 45.341528405, 9.35760498047, 45.5813674681}},
         {"minsk", {27.2845458984, 53.777934972, 27.8393554688, 54.0271334441}},
         {"moscow", {36.9964599609, 55.3962717136, 38.1884765625, 56.1118730004}},
+        {"mumbai", {72.7514648437, 18.8803004445, 72.9862976074, 19.2878132403}},
         {"munchen", {11.3433837891, 47.9981928195, 11.7965698242, 48.2530267576}},
         {"newyork", {-74.4104003906, 40.4134960497, -73.4600830078, 41.1869224229}},
         {"nnov", {43.6431884766, 56.1608472541, 44.208984375, 56.4245355509}},
@@ -366,13 +387,20 @@ namespace ftype
         {"osaka", {134.813232422, 34.1981730963, 136.076660156, 35.119908571}},
         {"oslo", {10.3875732422, 59.7812868211, 10.9286499023, 60.0401604652}},
         {"paris", {2.09014892578, 48.6637569323, 2.70538330078, 49.0414689141}},
+        {"rio", {-43.4873199463, -23.0348745407, -43.1405639648, -22.7134898498}},
         {"roma", {12.3348999023, 41.7672146942, 12.6397705078, 42.0105298189}},
         {"sanfran", {-122.72277832, 37.1690715771, -121.651611328, 38.0307856938}},
+        {"santiago", {-71.015625, -33.8133843291, -70.3372192383, -33.1789392606}},
+        {"saopaulo", {-46.9418334961, -23.8356009866, -46.2963867187, -23.3422558351}},
         {"seoul", {126.540527344, 37.3352243593, 127.23815918, 37.6838203267}},
         {"shanghai", {119.849853516, 30.5291450367, 122.102050781, 32.1523618947}},
+        {"shenzhen", {113.790893555, 22.459263801, 114.348449707, 22.9280416657}},
+        {"singapore", {103.624420166, 1.21389843409, 104.019927979, 1.45278619819}},
         {"spb", {29.70703125, 59.5231755354, 31.3110351562, 60.2725145948}},
         {"stockholm", {17.5726318359, 59.1336814082, 18.3966064453, 59.5565918857}},
+        {"stuttgart", {9.0877532959, 48.7471343254, 9.29306030273, 48.8755544436}},
         {"sydney", {150.42755127, -34.3615762875, 151.424560547, -33.4543597895}},
+        {"taipei", {121.368713379, 24.9312761454, 121.716156006, 25.1608229799}},
         {"tokyo", {139.240722656, 35.2186974963, 140.498657227, 36.2575628263}},
         {"warszawa", {20.7202148438, 52.0322181041, 21.3024902344, 52.4091212523}},
         {"washington", {-77.4920654297, 38.5954071994, -76.6735839844, 39.2216149801}},
@@ -389,13 +417,79 @@ namespace ftype
     return string();
   }
 
-  void PreprocessElement(OsmElement * p, FeatureParams & params)
+  string DetermineSurface(OsmElement * p)
+  {
+    string surface;
+    string smoothness;
+    string surface_grade;
+    bool isHighway = false;
+
+    for (auto const & tag : p->m_tags)
+    {
+      if (tag.key == "surface")
+        surface = tag.value;
+      else if (tag.key == "smoothness")
+        smoothness = tag.value;
+      else if (tag.key == "surface:grade")
+        surface_grade = tag.value;
+      else if (tag.key == "highway")
+        isHighway = true;
+    }
+
+    if (!isHighway || (surface.empty() && smoothness.empty()))
+      return string();
+
+    static my::StringIL pavedSurfaces = {"paved", "asphalt", "cobblestone", "cobblestone:flattened",
+                                         "sett", "concrete", "concrete:lanes", "concrete:plates",
+                                         "paving_stones", "metal", "wood"};
+    static my::StringIL badSurfaces = {"cobblestone", "sett", "metal", "wood", "grass", "gravel",
+                                       "mud", "sand", "snow", "woodchips"};
+    static my::StringIL badSmoothness = {"bad", "very_bad", "horrible", "very_horrible", "impassable",
+                                         "robust_wheels", "high_clearance", "off_road_wheels", "rough"};
+
+    bool isPaved = false;
+    bool isGood = true;
+
+    if (!surface.empty())
+    {
+      for (auto const & value : pavedSurfaces)
+        if (surface == value)
+          isPaved = true;
+    }
+    else
+      isPaved = smoothness == "excellent" || smoothness == "good";
+
+    if (!smoothness.empty())
+    {
+      for (auto const & value : badSmoothness)
+        if (smoothness == value)
+          isGood = false;
+      if (smoothness == "bad" && !isPaved)
+        isGood = true;
+    }
+    else if (surface_grade == "0" || surface_grade == "1")
+      isGood = false;
+    else
+    {
+      if (surface_grade != "3" )
+        for (auto const & value : badSurfaces)
+          if (surface == value)
+            isGood = false;
+    }
+
+    string psurface = isPaved ? "paved_" : "unpaved_";
+    psurface += isGood ? "good" : "bad";
+    return psurface;
+  }
+
+  void PreprocessElement(OsmElement * p)
   {
     bool hasLayer = false;
     char const * layer = nullptr;
 
-    bool isSubwayEntrance = false;
-    bool isSubwayStation = false;
+    bool isSubway = false;
+    bool isBus = false;
+    bool isTram = false;
 
     TagProcessor(p).ApplyRules
     ({
@@ -403,20 +497,93 @@ namespace ftype
       { "tunnel", "yes", [&layer] { layer = "-1"; }},
       { "layer", "*", [&hasLayer] { hasLayer = true; }},
 
-      { "railway", "subway_entrance", [&isSubwayEntrance] { isSubwayEntrance = true; }},
-      { "station", "subway", [&isSubwayStation] { isSubwayStation = true; }},
+      { "railway", "subway_entrance", [&isSubway] { isSubway = true; }},
+      { "bus", "yes", [&isBus] { isBus = true; }},
+      { "trolleybus", "yes", [&isBus] { isBus = true; }},
+      { "tram", "yes", [&isTram] { isTram = true; }},
+
+      /// @todo Unfortunatelly, it's not working in many cases (route=subway, transport=subway).
+      /// Actually, it's better to process subways after feature types assignment.
+      { "station", "subway", [&isSubway] { isSubway = true; }},
     });
 
     if (!hasLayer && layer)
       p->AddTag("layer", layer);
 
     // Tag 'city' is needed for correct selection of metro icons.
-    if (isSubwayEntrance || isSubwayStation)
+    if (isSubway && p->type == OsmElement::EntityType::Node)
     {
-      string const & city = MatchCity(p);
+      string const city = MatchCity(p);
       if (!city.empty())
         p->AddTag("city", city);
     }
+
+    p->AddTag("psurface", DetermineSurface(p));
+
+    // Convert public_transport tags to the older schema.
+    for (auto const & tag : p->m_tags)
+    {
+      if (tag.key == "public_transport")
+      {
+        if (tag.value == "platform" && isBus)
+        {
+          if (p->type == OsmElement::EntityType::Node)
+            p->AddTag("highway", "bus_stop");
+          else
+            p->AddTag("highway", "platform");
+        }
+        else if (tag.value == "stop_position" && isTram && p->type == OsmElement::EntityType::Node)
+          p->AddTag("railway", "tram_stop");
+        break;
+      }
+    }
+
+    // Merge attraction and memorial types to predefined set of values
+    p->UpdateTag("artwork_type", [](string & value) {
+      if (value.empty())
+        return;
+      if (value == "mural" || value == "graffiti" || value == "azulejo" || value == "tilework")
+        value = "painting";
+      else if (value == "stone" || value == "installation")
+        value = "sculpture";
+      else if (value == "bust")
+        value = "statue";
+    });
+
+    string const & memorialType = p->GetTag("memorial:type");
+    p->UpdateTag("memorial", [&memorialType](string & value) {
+      if (value.empty()) {
+        if (memorialType.empty())
+          return;
+        else
+          value = memorialType;
+      }
+
+      if (value == "blue_plaque" || value == "stolperstein")
+        value = "plaque";
+      else if (value == "war_memorial" || value == "stele" || value == "obelisk" ||
+               value == "stone" || value == "cross")
+        value = "sculpture";
+      else if (value == "bust" || value == "person")
+        value = "statue";
+    });
+
+    p->UpdateTag("castle_type", [](string & value) {
+      if (value.empty())
+        return;
+      if (value == "fortress" || value == "kremlin" || value == "castrum" ||
+          value == "shiro" || value == "citadel")
+        value = "defensive";
+      else if (value == "manor" || value == "palace")
+        value = "stately";
+    });
+
+    p->UpdateTag("attraction", [](string & value) {
+      // "specified" is a special value which means we have the "attraction" tag,
+      // but its value is not "animal".
+      if (!value.empty() && value != "animal")
+        value = "specified";
+    });
   }
 
   void PostprocessElement(OsmElement * p, FeatureParams & params)
@@ -436,9 +603,21 @@ namespace ftype
       }
     }
 
+    // Process yes/no tags.
+    TagProcessor(p).ApplyRules
+    ({
+      { "wheelchair", "designated", [&params] { params.AddType(types.Get(CachedTypes::WHEELCHAIR_YES)); }},
+      { "wifi", "~", [&params] { params.AddType(types.Get(CachedTypes::WLAN)); }},
+      { "building:part", "no", [&params] { params.AddType(types.Get(CachedTypes::HASPARTS)); }},
+      { "building:parts", "~", [&params] { params.AddType(types.Get(CachedTypes::HASPARTS)); }},
+    });
+
     bool highwayDone = false;
     bool subwayDone = false;
     bool railwayDone = false;
+
+    bool addOneway = false;
+    bool noOneway = false;
 
     // Get a copy of source types, because we will modify params in the loop;
     FeatureParams::TTypes const vTypes = params.m_Types;
@@ -448,23 +627,49 @@ namespace ftype
       {
         TagProcessor(p).ApplyRules
         ({
-          { "oneway", "yes", [&params] { params.AddType(types.Get(CachedTypes::ONEWAY)); }},
-          { "oneway", "1", [&params] { params.AddType(types.Get(CachedTypes::ONEWAY)); }},
-          { "oneway", "-1", [&params] { params.AddType(types.Get(CachedTypes::ONEWAY)); params.m_reverseGeometry = true; }},
+          { "oneway", "yes", [&addOneway] { addOneway = true; }},
+          { "oneway", "1", [&addOneway] { addOneway = true; }},
+          { "oneway", "-1", [&addOneway, &params] { addOneway = true; params.m_reverseGeometry = true; }},
+          { "oneway", "!", [&noOneway] { noOneway = true; }},
+          { "junction", "roundabout", [&addOneway] { addOneway = true; }},
 
           { "access", "private", [&params] { params.AddType(types.Get(CachedTypes::PRIVATE)); }},
+          { "access", "!", [&params] { params.AddType(types.Get(CachedTypes::PRIVATE)); }},
+
+          { "barrier", "gate", [&params] { params.AddType(types.Get(CachedTypes::BARRIER_GATE)); }},
 
           { "lit", "~", [&params] { params.AddType(types.Get(CachedTypes::LIT)); }},
+          { "toll", "~", [&params] { params.AddType(types.Get(CachedTypes::TOLL)); }},
 
           { "foot", "!", [&params] { params.AddType(types.Get(CachedTypes::NOFOOT)); }},
-
+          { "foot", "use_sidepath", [&params] { params.AddType(types.Get(CachedTypes::NOFOOT)); }},
           { "foot", "~", [&params] { params.AddType(types.Get(CachedTypes::YESFOOT)); }},
           { "sidewalk", "~", [&params] { params.AddType(types.Get(CachedTypes::YESFOOT)); }},
+
+          { "bicycle", "!", [&params] { params.AddType(types.Get(CachedTypes::NOBICYCLE)); }},
+          { "bicycle", "~", [&params] { params.AddType(types.Get(CachedTypes::YESBICYCLE)); }},
+          { "cycleway", "~", [&params] { params.AddType(types.Get(CachedTypes::YESBICYCLE)); }},
+          { "cycleway:right", "~", [&params] { params.AddType(types.Get(CachedTypes::YESBICYCLE)); }},
+          { "cycleway:left", "~", [&params] { params.AddType(types.Get(CachedTypes::YESBICYCLE)); }},
+          { "oneway:bicycle", "!", [&params] { params.AddType(types.Get(CachedTypes::BICYCLE_BIDIR)); }},
+          { "cycleway", "opposite", [&params] { params.AddType(types.Get(CachedTypes::BICYCLE_BIDIR)); }},
+
+          { "motor_vehicle", "private", [&params] { params.AddType(types.Get(CachedTypes::NOCAR)); }},
+          { "motor_vehicle", "!", [&params] { params.AddType(types.Get(CachedTypes::NOCAR)); }},
+          { "motor_vehicle", "yes", [&params] { params.AddType(types.Get(CachedTypes::YESCAR)); }},
+          { "motorcar", "private", [&params] { params.AddType(types.Get(CachedTypes::NOCAR)); }},
+          { "motorcar", "!", [&params] { params.AddType(types.Get(CachedTypes::NOCAR)); }},
+          { "motorcar", "yes", [&params] { params.AddType(types.Get(CachedTypes::YESCAR)); }},
         });
+
+        if (addOneway && !noOneway)
+          params.AddType(types.Get(CachedTypes::ONEWAY));
 
         highwayDone = true;
       }
 
+      /// @todo Probably, we can delete this processing because cities
+      /// are matched by limit rect in MatchCity.
       if (!subwayDone && types.IsRwSubway(vTypes[i]))
       {
         TagProcessor(p).ApplyRules
@@ -507,7 +712,7 @@ namespace ftype
   void GetNameAndType(OsmElement * p, FeatureParams & params)
   {
     // Stage1: Preprocess tags.
-    PreprocessElement(p, params);
+    PreprocessElement(p);
 
     // Stage2: Process feature name on all languages.
     ForEachTag<bool>(p, NamesExtractor(params));
@@ -515,48 +720,48 @@ namespace ftype
     // Stage3: Process base feature tags.
     TagProcessor(p).ApplyRules<void(string &, string &)>
     ({
-      { "atm", "yes", [](string & k, string & v) { k.swap(v); k = "amenity"; }},
-      { "restaurant", "yes", [](string & k, string & v) { k.swap(v); k = "amenity"; }},
-      { "hotel", "yes", [](string & k, string & v) { k.swap(v); k = "tourism"; }},
-      { "addr:housename", "*", [&params](string & k, string & v) { params.AddHouseName(v); k.clear(); v.clear();}},
-      { "addr:street", "*", [&params](string & k, string & v) { params.AddStreetAddress(v); k.clear(); v.clear();}},
-      { "addr:flats", "*", [&params](string & k, string & v) { params.flats = v; k.clear(); v.clear();}},
-      { "addr:housenumber", "*", [&params](string & k, string & v)
-        {
-          // Treat "numbers" like names if it's not an actual number.
-          if (!params.AddHouseNumber(v))
-            params.AddHouseName(v);
-          k.clear(); v.clear();
-        }},
+      { "addr:city", "*", [&params](string & k, string & v) { params.AddPlace(v); k.clear(); v.clear(); }},
+      { "addr:place", "*", [&params](string & k, string & v) { params.AddPlace(v); k.clear(); v.clear(); }},
+      { "addr:housenumber", "*", [&params](string & k, string & v) { params.AddHouseName(v); k.clear(); v.clear(); }},
+      { "addr:housename", "*", [&params](string & k, string & v) { params.AddHouseName(v); k.clear(); v.clear(); }},
+      { "addr:street", "*", [&params](string & k, string & v) { params.AddStreet(v); k.clear(); v.clear(); }},
+      //{ "addr:streetnumber", "*", [&params](string & k, string & v) { params.AddStreet(v); k.clear(); v.clear(); }},
+      // This line was first introduced by vng and was never used uncommented.
+      //{ "addr:full", "*", [&params](string & k, string & v) { params.AddAddress(v); k.clear(); v.clear(); }},
+
+      // addr:postcode must be passed to the metadata processor.
+      // { "addr:postcode", "*", [&params](string & k, string & v) { params.AddPostcode(v); k.clear(); v.clear(); }},
+
       { "population", "*", [&params](string & k, string & v)
         {
           // Get population rank.
-          // TODO: similar formula with indexer/feature.cpp, possible need refactoring
           uint64_t n;
           if (strings::to_uint64(v, n))
-            params.rank = static_cast<uint8_t>(log(double(n)) / log(1.1));
-          k.clear();
-          v.clear();
-        }},
+            params.rank = feature::PopulationToRank(n);
+          k.clear(); v.clear();
+        }
+      },
       { "ref", "*", [&params](string & k, string & v)
         {
           // Get reference (we process road numbers only).
           params.ref = v;
           k.clear(); v.clear();
-        }},
-      { "layer", "*", [&params](string & k, string & v)
+        }
+      },
+      { "layer", "*", [&params](string & /* k */, string & v)
         {
           // Get layer.
           if (params.layer == 0)
           {
             params.layer = atoi(v.c_str());
             int8_t const bound = 10;
-            params.layer = my::clamp(params.layer, -bound, bound);
+            params.layer = my::clamp(params.layer, static_cast<int8_t>(-bound), bound);
           }
-        }},
+        }
+      },
     });
 
-    // Stage4: Match tags to classificator for find feature types.
+    // Stage4: Match tags in classificator to find feature types.
     MatchTypes(p, params);
 
     // Stage5: Postprocess feature types.

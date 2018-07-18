@@ -1,19 +1,26 @@
 package com.mapswithme.maps.base;
 
-import android.app.Activity;
+import android.content.Context;
 import android.os.Bundle;
 import android.support.v4.app.ListFragment;
-import android.support.v4.app.NavUtils;
 import android.support.v7.widget.Toolbar;
 import android.view.View;
 
 import com.mapswithme.maps.R;
-import com.mapswithme.maps.activity.CustomNavigateUpListener;
 import com.mapswithme.util.UiUtils;
+import com.mapswithme.util.Utils;
 
+@Deprecated
 public abstract class BaseMwmListFragment extends ListFragment
 {
   private Toolbar mToolbar;
+
+  @Override
+  public void onAttach(Context context)
+  {
+    super.onAttach(context);
+    Utils.detachFragmentIfCoreNotInitialized(context, this);
+  }
 
   @Override
   public void onViewCreated(View view, Bundle savedInstanceState)
@@ -29,7 +36,7 @@ public abstract class BaseMwmListFragment extends ListFragment
         @Override
         public void onClick(View v)
         {
-          navigateUpToParent();
+          Utils.navigateToParent(getActivity());
         }
       });
     }
@@ -40,26 +47,18 @@ public abstract class BaseMwmListFragment extends ListFragment
     return mToolbar;
   }
 
+  @Override
   public void onResume()
   {
     super.onResume();
-    org.alohalytics.Statistics.logEvent("$onResume", this.getClass().getSimpleName()
-        + ":" + com.mapswithme.util.UiUtils.deviceOrientationAsString(getActivity()));
+    org.alohalytics.Statistics.logEvent("$onResume", getClass().getSimpleName() + ":" +
+                                                     UiUtils.deviceOrientationAsString(getActivity()));
   }
 
   @Override
   public void onPause()
   {
     super.onPause();
-    org.alohalytics.Statistics.logEvent("$onPause", this.getClass().getSimpleName());
-  }
-
-  public void navigateUpToParent()
-  {
-    final Activity activity = getActivity();
-    if (activity instanceof CustomNavigateUpListener)
-      ((CustomNavigateUpListener) activity).customOnNavigateUp();
-    else
-      NavUtils.navigateUpFromSameTask(activity);
+    org.alohalytics.Statistics.logEvent("$onPause", getClass().getSimpleName());
   }
 }

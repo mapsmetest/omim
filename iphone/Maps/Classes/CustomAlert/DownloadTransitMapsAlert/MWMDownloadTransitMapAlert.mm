@@ -1,109 +1,82 @@
-#import "ActiveMapsVC.h"
-#import "Common.h"
-#import "MWMAlertViewController.h"
+#import "MWMDownloadTransitMapAlert.h"
+#import "MWMCircularProgress.h"
+#import "MWMCommon.h"
 #import "MWMDownloaderDialogCell.h"
 #import "MWMDownloaderDialogHeader.h"
-#import "MWMDownloadTransitMapAlert.h"
+#import "MWMFrameworkListener.h"
+#import "MWMStorage.h"
 #import "Statistics.h"
-#import "UIColor+MapsMeColor.h"
+#import "SwiftBridge.h"
 #import "UILabel+RuntimeAttributes.h"
 
-@interface MWMDownloaderEntity : NSObject 
+#include "Framework.h"
 
-@property (copy, nonatomic) NSArray * titles;
-@property (copy, nonatomic) NSString * size;
-@property (nonatomic) BOOL isMapsFiles;
-
-- (instancetype)initWithIndexes:(vector<storage::TIndex> const &)indexes isMaps:(BOOL)isMaps;
-
-@end
-
-@implementation MWMDownloaderEntity
-
-- (instancetype)initWithIndexes:(vector<storage::TIndex> const &)indexes isMaps:(BOOL)isMaps
+namespace
 {
-  self = [super init];
-  if (self)
-  {
-    auto & a = GetFramework().GetCountryTree().GetActiveMapLayout();
-    NSMutableArray * titles = [@[] mutableCopy];
-    uint64_t totalRoutingSize = 0;
-    for (auto const & i : indexes)
-    {
-      [titles addObject:@(a.GetCountryName(i).c_str())];
-      totalRoutingSize += a.GetCountrySize(i, isMaps ? MapOptions::MapWithCarRouting : MapOptions::CarRouting).second;
-    }
-    self.isMapsFiles = isMaps;
-    self.titles = titles;
-    self.size = [NSString stringWithFormat:@"%@ %@", @(totalRoutingSize / MB), L(@"mb")];
-  }
-  return self;
-}
+NSString * const kDownloadTransitMapAlertNibName = @"MWMDownloadTransitMapAlert";
+NSString * const kStatisticsEvent = @"Map download Alert";
 
-@end
+CGFloat const kCellHeight = 32.;
+CGFloat const kHeaderHeight = 44.;
+CGFloat const kMinimumOffset = 20.;
+CGFloat const kAnimationDuration = .05;
+} // namespace
 
-typedef void (^MWMDownloaderBlock)();
+@interface MWMDownloadTransitMapAlert () <UITableViewDataSource, UITableViewDelegate, MWMFrameworkStorageObserver, MWMCircularProgressProtocol>
 
-typedef NS_ENUM(NSUInteger, SelectionState)
-{
-  SelectionStateNone,
-  SelectionStateFirst,
-  SelectionStateSecond,
-  SelectionStateBoth
-};
+@property(copy, nonatomic) MWMVoidBlock cancelBlock;
+@property(copy, nonatomic) MWMDownloadBlock downloadBlock;
+@property(copy, nonatomic) MWMVoidBlock downloadCompleteBlock;
 
-static NSString * const kCellIdentifier = @"MWMDownloaderDialogCell";
-static NSString * const kDownloadTransitMapAlertNibName = @"MWMDownloadTransitMapAlert";
-static CGFloat const kCellHeight = 32.;
-static CGFloat const kHeaderHeight = 43.;
-static CGFloat const kHeaderAndFooterHeight = 44.;
-static CGFloat const kMinimumOffset = 20.;
+@property (nonatomic) MWMCircularProgress * progress;
 
-static NSString * const kStatisticsEvent = @"Map download Alert";
-
-@interface MWMDownloadTransitMapAlert ()
-{
-  vector<storage::TIndex> maps;
-  vector<storage::TIndex> routes;
-}
-
+@property (weak, nonatomic) IBOutlet UIView * containerView;
 @property (weak, nonatomic) IBOutlet UILabel * titleLabel;
 @property (weak, nonatomic) IBOutlet UILabel * messageLabel;
-@property (copy, nonatomic) MWMDownloaderBlock downloaderBlock;
 @property (weak, nonatomic) IBOutlet UITableView * dialogsTableView;
 @property (weak, nonatomic) IBOutlet NSLayoutConstraint * tableViewHeight;
-@property (copy, nonatomic) NSArray * missedFiles;
-@property (nonatomic) MWMDownloaderDialogHeader * firstHeader;
-@property (nonatomic) MWMDownloaderDialogHeader * secondHeader;
-@property (nonatomic) SelectionState state;
+@property (nonatomic) MWMDownloaderDialogHeader * listHeader;
+@property (nonatomic) BOOL listExpanded;
 
-@end
+@property (weak, nonatomic) IBOutlet UIView * progressWrapper;
+@property (weak, nonatomic) IBOutlet UIView * hDivider;
+@property (weak, nonatomic) IBOutlet UIView * vDivider;
+@property (weak, nonatomic) IBOutlet UIButton * leftButton;
+@property (weak, nonatomic) IBOutlet UIButton * rightButton;
+@property (weak, nonatomic) IBOutlet NSLayoutConstraint * dialogsBottomOffset;
+@property (weak, nonatomic) IBOutlet NSLayoutConstraint * progressWrapperBottomOffset;
 
-@interface MWMDownloadTransitMapAlert (TableView) <UITableViewDataSource, UITableViewDelegate>
+@property (copy, nonatomic) NSArray<NSString *> * countriesNames;
+@property (copy, nonatomic) NSString * countriesSize;
 
 @end
 
 @implementation MWMDownloadTransitMapAlert
-
-+ (instancetype)downloaderAlertWithMaps:(vector<storage::TIndex> const &)maps
-                                 routes:(vector<storage::TIndex> const &)routes
-                                   code:(routing::IRouter::ResultCode)code
 {
-  [Statistics.instance logEvent:[NSString stringWithFormat:@"%@ - %@", kStatisticsEvent, @"open"]];
-  MWMDownloadTransitMapAlert * alert = [self alertWithMaps:maps routes:routes];
+  storage::TCountriesVec m_countries;
+}
+
++ (instancetype)downloaderAlertWithMaps:(storage::TCountriesVec const &)countries
+                                   code:(routing::RouterResultCode)code
+                            cancelBlock:(MWMVoidBlock)cancelBlock
+                          downloadBlock:(MWMDownloadBlock)downloadBlock
+                  downloadCompleteBlock:(MWMVoidBlock)downloadCompleteBlock
+{
+  [Statistics logEvent:kStatisticsEvent withParameters:@{kStatAction : kStatOpen}];
+  MWMDownloadTransitMapAlert * alert = [self alertWithCountries:countries];
   switch (code)
   {
-    case routing::IRouter::InconsistentMWMandRoute:
-    case routing::IRouter::RouteNotFound:
-    case routing::IRouter::RouteFileNotExist:
+    case routing::RouterResultCode::InconsistentMWMandRoute:
+    case routing::RouterResultCode::RouteNotFound:
+    case routing::RouterResultCode::RouteFileNotExist:
       alert.titleLabel.localizedText = @"dialog_routing_download_files";
       alert.messageLabel.localizedText = @"dialog_routing_download_and_update_all";
       break;
-    case routing::IRouter::FileTooOld:
+    case routing::RouterResultCode::FileTooOld:
       alert.titleLabel.localizedText = @"dialog_routing_download_files";
       alert.messageLabel.localizedText = @"dialog_routing_download_and_update_maps";
       break;
-    case routing::IRouter::NeedMoreMaps:
+    case routing::RouterResultCode::NeedMoreMaps:
       alert.titleLabel.localizedText = @"dialog_routing_download_and_build_cross_route";
       alert.messageLabel.localizedText = @"dialog_routing_download_cross_route";
       break;
@@ -111,136 +84,177 @@ static NSString * const kStatisticsEvent = @"Map download Alert";
       NSAssert(false, @"Incorrect code!");
       break;
   }
+  alert.cancelBlock = cancelBlock;
+  alert.downloadBlock = downloadBlock;
+  alert.downloadCompleteBlock = downloadCompleteBlock;
   return alert;
 }
 
-+ (instancetype)alertWithMaps:(vector<storage::TIndex> const &)maps routes:(vector<storage::TIndex> const &)routes
++ (instancetype)alertWithCountries:(storage::TCountriesVec const &)countries
 {
-  MWMDownloadTransitMapAlert * alert = [[[NSBundle mainBundle] loadNibNamed:kDownloadTransitMapAlertNibName owner:nil options:nil] firstObject];
-  NSMutableArray * missedFiles = [@[] mutableCopy];
-  if (!maps.empty())
-  {
-    MWMDownloaderEntity * entity = [[MWMDownloaderEntity alloc] initWithIndexes:maps isMaps:YES];
-    [missedFiles addObject:entity];
-  }
-  if (!routes.empty())
-  {
-    MWMDownloaderEntity * entity = [[MWMDownloaderEntity alloc] initWithIndexes:routes isMaps:NO];
-    [missedFiles addObject:entity];
-  }
-  alert.missedFiles = missedFiles;
-  alert->maps = maps;
-  alert->routes = routes;
-  __weak MWMDownloadTransitMapAlert * wAlert = alert;
-  alert.downloaderBlock = ^()
-  {
-    __strong MWMDownloadTransitMapAlert * alert = wAlert;
-    auto & a = GetFramework().GetCountryTree().GetActiveMapLayout();
-    for (auto const & index : alert->maps)
-      a.DownloadMap(index, MapOptions::MapWithCarRouting);
-    for (auto const & index : alert->routes)
-      a.DownloadMap(index, MapOptions::CarRouting);
-  };
+  NSAssert(!countries.empty(), @"countries can not be empty.");
+  MWMDownloadTransitMapAlert * alert =
+      [NSBundle.mainBundle loadNibNamed:kDownloadTransitMapAlertNibName owner:nil options:nil]
+          .firstObject;
+
+  alert->m_countries = countries;
   [alert configure];
+  [alert updateCountriesList];
+  [MWMFrameworkListener addObserver:alert];
   return alert;
 }
 
 - (void)configure
 {
-  [self.dialogsTableView registerNib:[UINib nibWithNibName:kCellIdentifier bundle:nil] forCellReuseIdentifier:kCellIdentifier];
-  self.state = SelectionStateNone;
+  [self.dialogsTableView registerWithCellClass:[MWMDownloaderDialogCell class]];
+  self.listExpanded = NO;
+  CALayer * containerViewLayer = self.containerView.layer;
+  containerViewLayer.shouldRasterize = YES;
+  containerViewLayer.rasterizationScale = [[UIScreen mainScreen] scale];
   [self.dialogsTableView reloadData];
+}
+
+- (void)updateCountriesList
+{
+  auto const & s = GetFramework().GetStorage();
+  m_countries.erase(
+      remove_if(m_countries.begin(), m_countries.end(),
+                [&s](TCountryId const & countryId) { return s.HasLatestVersion(countryId); }),
+      m_countries.end());
+  NSMutableArray<NSString *> * titles = [@[] mutableCopy];
+  TMwmSize totalSize = 0;
+  for (auto const & countryId : m_countries)
+  {
+    storage::NodeAttrs attrs;
+    s.GetNodeAttrs(countryId, attrs);
+    [titles addObject:@(attrs.m_nodeLocalName.c_str())];
+    totalSize += attrs.m_mwmSize;
+  }
+  self.countriesNames = titles;
+  self.countriesSize = formattedSize(totalSize);
+}
+
+#pragma mark - MWMCircularProgressProtocol
+
+- (void)progressButtonPressed:(nonnull MWMCircularProgress *)progress
+{
+  for (auto const & countryId : m_countries)
+    [MWMStorage cancelDownloadNode:countryId];
+  [self cancelButtonTap];
+}
+
+#pragma mark - MWMFrameworkStorageObserver
+
+- (void)processCountryEvent:(TCountryId const &)countryId
+{
+  if (find(m_countries.begin(), m_countries.end(), countryId) == m_countries.end())
+    return;
+  if (self.rightButton.hidden)
+  {
+    auto const & s = GetFramework().GetStorage();
+    auto const & p = GetFramework().GetDownloadingPolicy();
+    if (s.CheckFailedCountries(m_countries))
+    {
+      if (p.IsAutoRetryDownloadFailed())
+        [self close:nil];
+      return;
+    }
+    auto const overallProgress = s.GetOverallProgress(m_countries);
+    // Test if downloading has finished by comparing downloaded and total sizes.
+    if (overallProgress.first == overallProgress.second)
+      [self close:self.downloadCompleteBlock];
+  }
+  else
+  {
+    [self updateCountriesList];
+    [self.dialogsTableView reloadSections:[NSIndexSet indexSetWithIndex:0]
+                         withRowAnimation:UITableViewRowAnimationAutomatic];
+    if (m_countries.empty())
+      [self close:self.downloadCompleteBlock];
+  }
+}
+
+- (void)processCountry:(TCountryId const &)countryId progress:(MapFilesDownloader::TProgress const &)progress
+{
+  if (!self.rightButton.hidden ||
+      find(m_countries.begin(), m_countries.end(), countryId) == m_countries.end())
+    return;
+  auto const overallProgress = GetFramework().GetStorage().GetOverallProgress(m_countries);
+  CGFloat const progressValue = static_cast<CGFloat>(overallProgress.first) / overallProgress.second;
+  self.progress.progress = progressValue;
+  self.titleLabel.text = [NSString stringWithFormat:@"%@%@%%", L(@"downloading"), @(floor(progressValue * 100))];
 }
 
 #pragma mark - Actions
 
-- (IBAction)notNowButtonTap:(id)sender
+- (IBAction)cancelButtonTap
 {
-  [Statistics.instance logEvent:[NSString stringWithFormat:@"%@ - %@", kStatisticsEvent, @"notNowButtonTap"]];
-  [self close];
+  [Statistics logEvent:kStatisticsEvent withParameters:@{kStatAction : kStatClose}];
+  [self close:self.cancelBlock];
 }
 
-- (IBAction)downloadButtonTap:(id)sender
+- (IBAction)downloadButtonTap
 {
-  [Statistics.instance logEvent:[NSString stringWithFormat:@"%@ - %@", kStatisticsEvent, @"downloadButtonTap"]];
-  [self downloadMaps];
-}
-
-- (void)downloadMaps
-{
-  self.downloaderBlock();
-  [self close];
-  ActiveMapsVC * activeMapsViewController = [[ActiveMapsVC alloc] init];
-  [self.alertController.ownerViewController.navigationController pushViewController:activeMapsViewController animated:YES];
+  [Statistics logEvent:kStatisticsEvent withParameters:@{kStatAction : kStatApply}];
+  [self updateCountriesList];
+  if (m_countries.empty())
+  {
+    [self close:self.downloadCompleteBlock];
+    return;
+  }
+  self.downloadBlock(m_countries, ^{
+    self.titleLabel.text = L(@"downloading");
+    self.messageLabel.hidden = YES;
+    self.progressWrapper.hidden = NO;
+    self.progress.state = MWMCircularProgressStateSpinner;
+    self.hDivider.hidden = YES;
+    self.vDivider.hidden = YES;
+    self.leftButton.hidden = YES;
+    self.rightButton.hidden = YES;
+    self.dialogsBottomOffset.priority = UILayoutPriorityDefaultHigh;
+    self.progressWrapperBottomOffset.priority = UILayoutPriorityDefaultHigh;
+    [UIView animateWithDuration:kAnimationDuration
+                     animations:^{
+                       [self layoutSubviews];
+                     }];
+  });
 }
 
 - (void)showDownloadDetail:(UIButton *)sender
 {
-  if ([sender isEqual:self.firstHeader.headerButton])
+  self.listExpanded = sender.selected;
+}
+
+- (void)setListExpanded:(BOOL)listExpanded
+{
+  _listExpanded = listExpanded;
+  [self layoutIfNeeded];
+  auto const updateCells = ^(BOOL show)
   {
-    if (!self.secondHeader.headerButton.selected)
-      self.state = sender.selected ? SelectionStateFirst : SelectionStateNone;
-    else
-      self.state = sender.selected ? SelectionStateBoth : SelectionStateSecond;
+    for (MWMDownloaderDialogCell * cell in self.dialogsTableView.visibleCells)
+    {
+      cell.titleLabel.alpha = show ? 1. : 0.;
+    }
+    [self.dialogsTableView refresh];
+  };
+  if (listExpanded)
+  {
+    CGFloat const actualHeight = kCellHeight * m_countries.size() + kHeaderHeight;
+    CGFloat const height = [self bounded:actualHeight withHeight:self.superview.height];
+    self.tableViewHeight.constant = height;
+    self.dialogsTableView.scrollEnabled = actualHeight > self.tableViewHeight.constant;
+    [UIView animateWithDuration:kAnimationDuration animations:^{ [self layoutSubviews]; }
+                     completion:^(BOOL finished)
+    {
+      [UIView animateWithDuration:kDefaultAnimationDuration animations:^{ updateCells(YES); }];
+    }];
   }
   else
   {
-    if (!self.firstHeader.headerButton.selected)
-      self.state = sender.selected ? SelectionStateSecond : SelectionStateNone;
-    else
-      self.state = sender.selected ? SelectionStateBoth : SelectionStateFirst;
-  }
-}
-
-- (void)setState:(SelectionState)state
-{
-  _state = state;
-  [self layoutIfNeeded];
-  NSUInteger const numberOfSections = self.missedFiles.count;
-  switch (state)
-  {
-    case SelectionStateNone:
-    {
-      CGFloat const height = kHeaderAndFooterHeight * numberOfSections;
-      self.tableViewHeight.constant = height;
-      self.dialogsTableView.scrollEnabled = NO;
-      [self.dialogsTableView.visibleCells enumerateObjectsUsingBlock:^(MWMDownloaderDialogCell * obj, NSUInteger idx, BOOL *stop) {
-        obj.titleLabel.alpha = 0.;
-      }];
-      [self.dialogsTableView beginUpdates];
-      [self.dialogsTableView endUpdates];
-      [UIView animateWithDuration:.05 animations:^
-      {
-        [self layoutSubviews];
-      }];
-      break;
-    }
-    case SelectionStateFirst:
-    case SelectionStateSecond:
-    case SelectionStateBoth:
-    {
-      NSUInteger const cellCount = self.cellCountForCurrentState;
-      CGFloat const actualHeight = kCellHeight * cellCount + kHeaderAndFooterHeight * numberOfSections;
-      CGFloat const height = [self bounded:actualHeight withHeight:self.superview.height];
-      self.tableViewHeight.constant = height;
-      self.dialogsTableView.scrollEnabled = actualHeight > self.tableViewHeight.constant ? YES : NO;
-      [UIView animateWithDuration:.05 animations:^
-      {
-        [self layoutSubviews];
-      }
-      completion:^(BOOL finished)
-      {
-        [UIView animateWithDuration:kDefaultAnimationDuration animations:^{
-          [self.dialogsTableView beginUpdates];
-          [self.dialogsTableView.visibleCells enumerateObjectsUsingBlock:^(MWMDownloaderDialogCell * obj, NSUInteger idx, BOOL *stop)
-            {
-              obj.titleLabel.alpha = 1.;
-          }];
-          [self.dialogsTableView endUpdates];
-        }];
-      }];
-      break;
-    }
+    self.tableViewHeight.constant = kHeaderHeight;
+    self.dialogsTableView.scrollEnabled = NO;
+    updateCells(NO);
+    [UIView animateWithDuration:kAnimationDuration animations:^{ [self layoutSubviews]; }];
   }
 }
 
@@ -254,33 +268,16 @@ static NSString * const kStatisticsEvent = @"Map download Alert";
 
 - (void)invalidateTableConstraintWithHeight:(CGFloat)height
 {
-  NSUInteger const numberOfSections = self.missedFiles.count;
-  switch (self.state)
+  if (self.listExpanded)
   {
-    case SelectionStateNone:
-      self.tableViewHeight.constant = kHeaderAndFooterHeight * numberOfSections ;
-      break;
-    case SelectionStateFirst:
-    case SelectionStateSecond:
-    case SelectionStateBoth:
-    {
-      NSUInteger const cellCount = self.cellCountForCurrentState;
-      CGFloat const actualHeight = kCellHeight * cellCount + kHeaderAndFooterHeight * numberOfSections;
-      self.tableViewHeight.constant = [self bounded:actualHeight withHeight:height];;
-      self.dialogsTableView.scrollEnabled = actualHeight > self.tableViewHeight.constant;
-      break;
-    }
+    CGFloat const actualHeight = kCellHeight * m_countries.size() + kHeaderHeight;
+    self.tableViewHeight.constant = [self bounded:actualHeight withHeight:height];
+    self.dialogsTableView.scrollEnabled = actualHeight > self.tableViewHeight.constant;
   }
-}
-
-- (NSUInteger)cellCountForCurrentState
-{
-  if (self.state == SelectionStateBoth)
-    return [[self.missedFiles[0] titles] count] + [[self.missedFiles[1] titles] count];
-  else if (self.state == SelectionStateFirst)
-    return [[self.missedFiles[0] titles] count];
   else
-    return [[self.missedFiles[1] titles] count];
+  {
+    self.tableViewHeight.constant = kHeaderHeight;
+  }
 }
 
 - (void)willRotateToInterfaceOrientation:(UIInterfaceOrientation)orientation
@@ -289,18 +286,17 @@ static NSString * const kStatisticsEvent = @"Map download Alert";
   [self invalidateTableConstraintWithHeight:height];
 }
 
-@end
-
-@implementation MWMDownloadTransitMapAlert (TableView)
-
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
+- (void)close:(MWMVoidBlock)completion
 {
-  return self.missedFiles.count;
+  [MWMFrameworkListener removeObserver:self];
+  [super close:completion];
 }
+
+#pragma mark - UITableViewDelegate
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
-  return [[self.missedFiles[section] titles] count];
+  return m_countries.size();
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section
@@ -310,74 +306,50 @@ static NSString * const kStatisticsEvent = @"Map download Alert";
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-  switch (self.state)
-  {
-    case SelectionStateNone:
-      return 0.;
-    case SelectionStateFirst:
-      return indexPath.section == 0 ? kCellHeight : 0.;
-    case SelectionStateSecond:
-      return indexPath.section == 0 ? 0. : kCellHeight;
-    case SelectionStateBoth:
-      return kCellHeight;
-  }
+  return kCellHeight;
 }
 
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section
 {
-  if (section == 0)
-  {
-    if (self.firstHeader)
-      return self.firstHeader;
-  }
-  else
-  {
-    if (self.secondHeader)
-      return self.secondHeader;
-  }
-
-  MWMDownloaderEntity * entity = self.missedFiles[section];
-  NSUInteger const count = entity.titles.count;
-  NSString * title;
-  MWMDownloaderDialogHeader * header;
-  if (count > 1)
-  {
-    title = entity.isMapsFiles ? [NSString stringWithFormat:@"%@ (%@)", L(@"maps"), @(count)] : [NSString stringWithFormat:@"%@(%@)", L(@"dialog_routing_routes_size"), @(count)];;
-    header = [MWMDownloaderDialogHeader headerForOwnerAlert:self title:title size:entity.size];
-  }
-  else
-  {
-    title = entity.titles.firstObject;
-    header = [MWMDownloaderDialogHeader headerForOwnerAlert:self title:title size:entity.size];
-    header.headerButton.enabled = NO;
-    header.expandImage.hidden = YES;
-    [header layoutSizeLabel];
-  }
-  if (section == 0)
-  {
-    self.firstHeader = header;
-    return self.firstHeader;
-  }
-  self.secondHeader = header;
-  return self.secondHeader;
+  return self.listHeader;
 }
 
 - (UIView *)tableView:(UITableView *)tableView viewForFooterInSection:(NSInteger)section
 {
   UIView * view = [[UIView alloc] init];
-  view.backgroundColor = self.missedFiles.count == 2 && section == 0 ? UIColor.blackDividers : [UIColor colorWithWhite:0. alpha:0.06];
+  view.backgroundColor = UIColor.blackOpaque;
   return view;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-  MWMDownloaderDialogCell * cell = (MWMDownloaderDialogCell *)[tableView dequeueReusableCellWithIdentifier:kCellIdentifier];
-  if (!cell)
-    cell = [[MWMDownloaderDialogCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:kCellIdentifier];
-
-  NSString * title = [self.missedFiles[indexPath.section] titles][indexPath.row];
-  cell.titleLabel.text = title;
+  Class cls = [MWMDownloaderDialogCell class];
+  auto cell = static_cast<MWMDownloaderDialogCell *>(
+      [tableView dequeueReusableCellWithCellClass:cls indexPath:indexPath]);
+  cell.titleLabel.text = self.countriesNames[indexPath.row];
   return cell;
+}
+
+#pragma mark - Properties
+
+- (MWMDownloaderDialogHeader *)listHeader
+{
+  if (!_listHeader)
+    _listHeader = [MWMDownloaderDialogHeader headerForOwnerAlert:self];
+
+  [_listHeader setTitle:[NSString stringWithFormat:@"%@ (%@)", L(@"maps"), @(m_countries.size())]
+                   size:self.countriesSize];
+  return _listHeader;
+}
+
+- (MWMCircularProgress *)progress
+{
+  if (!_progress)
+  {
+    _progress = [MWMCircularProgress downloaderProgressForParentView:self.progressWrapper];
+    _progress.delegate = self;
+  }
+  return _progress;
 }
 
 @end

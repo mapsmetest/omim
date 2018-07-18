@@ -51,8 +51,8 @@ UNIT_TEST(GarbadgeInputToResponseParser)
 
 UNIT_TEST(OnlineAbsentFetcherSingleMwmTest)
 {
-  OnlineAbsentCountriesFetcher fetcher([](m2::PointD const & p){return "A";}, [](string const &){return nullptr;});
-  fetcher.GenerateRequest({1, 1}, {2, 2});
+  OnlineAbsentCountriesFetcher fetcher([](m2::PointD const & p){return "A";}, [](string const &){return false;});
+  fetcher.GenerateRequest(Checkpoints({1, 1}, {2, 2}));
   vector<string> countries;
   fetcher.GetAbsentCountries(countries);
   TEST(countries.empty(), ());

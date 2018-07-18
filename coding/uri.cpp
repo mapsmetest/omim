@@ -3,7 +3,6 @@
 
 #include "base/assert.hpp"
 
-
 namespace url_scheme
 {
 
@@ -47,11 +46,17 @@ bool Uri::Parse()
   return true;
 }
 
-void Uri::ForEachKeyValue(CallbackT const & callback) const
+bool Uri::ForEachKeyValue(TCallback const & callback) const
 {
   // parse query for keys and values
   size_t const count = m_url.size();
-  for (size_t start = m_queryStart; start < count; )
+  size_t const queryStart = m_queryStart;
+
+  // Just a URL without parameters.
+  if (queryStart == count)
+    return false;
+
+  for (size_t start = queryStart; start < count; )
   {
     size_t end = m_url.find('&', start);
     if (end == string::npos)
@@ -71,11 +76,13 @@ void Uri::ForEachKeyValue(CallbackT const & callback) const
       else
         key = UrlDecode(m_url.substr(start, end - start));
 
-      callback(key, value);
+      if (!callback(key, value))
+        return false;
     }
 
     start = end + 1;
   }
+  return true;
 }
 
 }

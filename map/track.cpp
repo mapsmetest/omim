@@ -1,112 +1,42 @@
 #include "map/track.hpp"
+#include "map/user_mark_id_storage.hpp"
 
-#include "indexer/mercator.hpp"
-
-#include "graphics/screen.hpp"
-#include "graphics/pen.hpp"
-#include "graphics/depth_constants.hpp"
-#include "graphics/display_list.hpp"
-#include "graphics/defines.hpp"
-
-#include "geometry/distance.hpp"
-#include "geometry/simplification.hpp"
 #include "geometry/distance_on_sphere.hpp"
+#include "geometry/mercator.hpp"
 
-#include "base/timer.hpp"
-#include "base/logging.hpp"
-
-#include "platform/location.hpp"
-
-
-Track::~Track()
+Track::Track(kml::TrackData && data)
+  : Base(data.m_id == kml::kInvalidTrackId ? UserMarkIdStorage::Instance().GetNextTrackId() : data.m_id)
+  , m_data(std::move(data))
+  , m_groupID(0)
 {
-  DeleteDisplayList();
+  m_data.m_id = GetId();
+  ASSERT_GREATER(m_data.m_points.size(), 1, ());
 }
 
-Track * Track::CreatePersistent()
+string Track::GetName() const
 {
-  Track * p = new Track();
-  Swap(*p);
-  return p;
+  return kml::GetDefaultStr(m_data.m_name);
 }
 
-float Track::GetMainWidth() const
+m2::RectD Track::GetLimitRect() const
 {
-  ASSERT(!m_outlines.empty(), ());
-  return m_outlines.back().m_lineWidth;
-}
-
-const graphics::Color & Track::GetMainColor() const
-{
-  ASSERT(!m_outlines.empty(), ());
-  return m_outlines.back().m_color;
-}
-
-void Track::DeleteDisplayList() const
-{
-  delete m_dList;
-  m_dList = nullptr;
-}
-
-void Track::AddOutline(TrackOutline const * outline, size_t arraySize)
-{
-  m_outlines.reserve(m_outlines.size() + arraySize);
-  for_each(outline, outline + arraySize, MakeBackInsertFunctor(m_outlines));
-  sort(m_outlines.begin(), m_outlines.end(), [] (TrackOutline const & l, TrackOutline const & r)
-  {
-    return l.m_lineWidth > r.m_lineWidth;
-  });
-}
-
-void Track::Draw(graphics::Screen * pScreen, MatrixT const & matrix) const
-{
-  pScreen->drawDisplayList(m_dList, matrix);
-}
-
-void Track::CreateDisplayListPolyline(graphics::Screen * dlScreen, PointContainerT const & pts) const
-{
-  double baseDepthTrack = graphics::tracksDepth - 10 * m_outlines.size();
-  for (TrackOutline const & outline : m_outlines)
-  {
-    graphics::Pen::Info const outlineInfo(outline.m_color, outline.m_lineWidth);
-    uint32_t const outlineId = dlScreen->mapInfo(outlineInfo);
-    dlScreen->drawPath(pts.data(), pts.size(), 0, outlineId, baseDepthTrack);
-    baseDepthTrack += 10;
-  }
-}
-
-void Track::CreateDisplayList(graphics::Screen * dlScreen, MatrixT const & matrix, bool isScaleChanged,
-                              int, double, location::RouteMatchingInfo const &) const
-{
-  if (HasDisplayLists() && !isScaleChanged)
-    return;
-
-  DeleteDisplayList();
-
-  m_dList = dlScreen->createDisplayList();
-  dlScreen->beginFrame();
-  dlScreen->setDisplayList(m_dList);
-
-  PointContainerT pts;
-  pts.reserve(m_polyline.GetSize());
-  TransformAndSymplifyPolyline(m_polyline, matrix, GetMainWidth(), pts);
-  CreateDisplayListPolyline(dlScreen, pts);
-
-  dlScreen->setDisplayList(0);
-  dlScreen->endFrame();
+  m2::RectD rect;
+  for (auto const & point : m_data.m_points)
+    rect.Add(point);
+  return rect;
 }
 
 double Track::GetLengthMeters() const
 {
   double res = 0.0;
 
-  PolylineD::TIter i = m_polyline.Begin();
-  double lat1 = MercatorBounds::YToLat(i->y);
-  double lon1 = MercatorBounds::XToLon(i->x);
-  for (++i; i != m_polyline.End(); ++i)
+  auto it = m_data.m_points.begin();
+  double lat1 = MercatorBounds::YToLat(it->y);
+  double lon1 = MercatorBounds::XToLon(it->x);
+  for (++it; it != m_data.m_points.end(); ++it)
   {
-    double const lat2 = MercatorBounds::YToLat(i->y);
-    double const lon2 = MercatorBounds::XToLon(i->x);
+    double const lat2 = MercatorBounds::YToLat(it->y);
+    double const lon2 = MercatorBounds::XToLon(it->x);
     res += ms::DistanceOnEarth(lat1, lon1, lat2, lon2);
     lat1 = lat2;
     lon1 = lon2;
@@ -115,39 +45,45 @@ double Track::GetLengthMeters() const
   return res;
 }
 
-void Track::Swap(Track & rhs)
+df::RenderState::DepthLayer Track::GetDepthLayer() const
 {
-  swap(m_rect, rhs.m_rect);
-  swap(m_outlines, rhs.m_outlines);
-  m_name.swap(rhs.m_name);
-  m_polyline.Swap(rhs.m_polyline);
-
-  DeleteDisplayList();
-  rhs.DeleteDisplayList();
+  return df::RenderState::UserLineLayer;
 }
 
-void Track::CleanUp() const
+size_t Track::GetLayerCount() const
 {
-  DeleteDisplayList();
+  return m_data.m_layers.size();
 }
 
-bool Track::HasDisplayLists() const
+dp::Color Track::GetColor(size_t layerIndex) const
 {
-  return m_dList != nullptr;
+  CHECK_LESS(layerIndex, m_data.m_layers.size(), ());
+  return dp::Color(m_data.m_layers[layerIndex].m_color.m_rgba);
 }
 
-void TransformPolyline(Track::PolylineD const & polyline, MatrixT const & matrix, PointContainerT & pts)
+float Track::GetWidth(size_t layerIndex) const
 {
-  pts.resize(polyline.GetSize());
-  transform(polyline.Begin(), polyline.End(), pts.begin(), DoLeftProduct<MatrixT>(matrix));
+  CHECK_LESS(layerIndex, m_data.m_layers.size(), ());
+  return static_cast<float>(m_data.m_layers[layerIndex].m_lineWidth);
 }
 
-void TransformAndSymplifyPolyline(Track::PolylineD const & polyline, MatrixT const & matrix, double width, PointContainerT & pts)
+float Track::GetDepth(size_t layerIndex) const
 {
-  PointContainerT pts1(polyline.GetSize());
-  TransformPolyline(polyline, matrix, pts1);
-  SimplifyDP(pts1.begin(), pts1.end(), width,
-             m2::DistanceToLineSquare<m2::PointD>(), MakeBackInsertFunctor(pts));
+  return layerIndex * 10;
 }
 
+std::vector<m2::PointD> const & Track::GetPoints() const
+{
+  return m_data.m_points;
+}
 
+void Track::Attach(kml::MarkGroupId groupId)
+{
+  ASSERT(!m_groupID, ());
+  m_groupID = groupId;
+}
+
+void Track::Detach()
+{
+  m_groupID = 0;
+}

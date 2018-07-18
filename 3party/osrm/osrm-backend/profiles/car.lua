@@ -124,7 +124,11 @@ maxspeed_table = {
   ["gb:motorway"] = (70*1609)/1000,
   ["uk:nsl_single"] = (60*1609)/1000,
   ["uk:nsl_dual"] = (70*1609)/1000,
-  ["uk:motorway"] = (70*1609)/1000
+  ["uk:motorway"] = (70*1609)/1000,
+  ["nl:rural"] = 80,
+  ["nl:trunk"] = 100,
+  ["nl:motorway"] = 130,
+  ["none"] = 140
 }
 
 traffic_signal_penalty          = 2
@@ -141,6 +145,7 @@ local min = math.min
 local max = math.max
 
 local speed_reduction = 0.8
+local side_road_speed_multiplier = 0.8
 
 --modes
 local mode_normal = 1
@@ -310,8 +315,8 @@ function way_function (way, result)
       end
     else
       -- Set the avg speed on ways that are marked accessible
-      -- OMIM does not support non highway classes
-      --if access_tag_whitelist[access] and "yes" ~= access then
+      -- OMIM does not support not highway classes
+      -- if access_tag_whitelist[access] and "yes" ~= access then
       --  result.forward_speed = speed_profile["default"]
       --  result.backward_speed = speed_profile["default"]
       --end
@@ -325,6 +330,14 @@ function way_function (way, result)
 
   if -1 == result.forward_speed and -1 == result.backward_speed then
     return
+  end
+
+  -- reduce speed on special side roads
+  local sideway = way:get_value_by_key("side_road")
+  if "yes" == sideway or
+  "rotary" == sideway then
+    result.forward_speed = result.forward_speed * side_road_speed_multiplier
+    result.backward_speed = result.backward_speed * side_road_speed_multiplier
   end
 
   -- reduce speed on bad surfaces

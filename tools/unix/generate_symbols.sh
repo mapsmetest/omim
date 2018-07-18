@@ -1,98 +1,114 @@
 #!/bin/bash
-set -e -u -x
+set -e -u
 
-MY_PATH=`pwd`
-BINARY_PATH="$MY_PATH/../../out/release/skin_generator"
-DATA_PATH="$MY_PATH/../../data"
+# Prevent python from generating compiled *.pyc files
+export PYTHONDONTWRITEBYTECODE=1
+
+OMIM_PATH="${OMIM_PATH:-$(cd "$(dirname "$0")/../.."; pwd)}"
+OUT_PATH="$OMIM_PATH/out/release"
+SKIN_GENERATOR="$OUT_PATH/skin_generator_tool"
+DATA_PATH="$OMIM_PATH/data"
+LOCAL_ADS_SYMBOLS_GENERATOR="$OMIM_PATH/tools/python/generate_local_ads_symbols.py"
 
 # If skin_generator does not exist then build it
-if [ ! -f $BINARY_PATH ];
+if [ ! -f "$SKIN_GENERATOR" ];
 then
-  projects=(freetype gflags)
-  for project in ${projects[*]}
-  do
-    cd $MY_PATH/../../3party/$project
-    qmake $project.pro -r -spec macx-clang CONFIG+=x86_64
-    make
-  done
-  projects=(base coding geometry skin_generator)
-  for project in ${projects[*]}
-  do
-    cd $MY_PATH/../../$project
-    qmake $project.pro -r -spec macx-clang CONFIG+=x86_64
-    make
-  done
-  cd $MY_PATH
+  source "$OMIM_PATH/tools/autobuild/detect_cmake.sh"
+  # OS-specific parameters
+  if [ "$(uname -s)" == "Darwin" ]; then
+    PROCESSES=$(sysctl -n hw.ncpu)
+  else
+    PROCESSES=$(nproc)
+  fi
+  mkdir -p "$OUT_PATH"
+  pushd "$OUT_PATH" > /dev/null
+  "$CMAKE" "$OMIM_PATH" -DSKIP_TESTS:bool=true
+  make skin_generator_tool -j$PROCESSES
+  popd > /dev/null
 fi
 
 # Helper function to build skin
-# Parameter $1 - style type (legacy, clear)
-# Parameter $2 - style name (dark, light, yota, clear, ...)
-# Parameter $3 - resource name (ldpi, mdpi, hdpi, ...)
+# Parameter $1 - style type (clear)
+# Parameter $2 - style name (dark, light, clear, ...)
+# Parameter $3 - resource name (mdpi, hdpi, ...)
 # Parameter $4 - symbol size
 # Parameter $5 - does color correction required
 # Parameter $6 - style suffix (none, _dark, _clear)
+# Parameter $7 - symbols folder (symbols, symbols-ad)
+# Parameter $8 - symbols suffix (none, -ad)
 function BuildSkin() {
   styleType=$1
   styleName=$2
   resourceName=$3
   symbolSize=$4
   colorCorrection=$5
-  suffix=${6-}
+  suffix=$6
+  symbolsFolder=$7
+  symbolsSuffix=${8-}
+
   echo "Building skin for $styleName/$resourceName"
   # Set environment
-  PNG_PATH="$DATA_PATH/styles/$styleType/style-$styleName/symbols/png"
-  rm -r $PNG_PATH || true
-  ln -s "$DATA_PATH/styles/$styleType/style-$styleName/$resourceName" $PNG_PATH
+  STYLE_PATH="$DATA_PATH/styles/$styleType/style-$styleName"
+  PNG_PATH="$STYLE_PATH/symbols/png"
+  rm -rf "$PNG_PATH" || true
+  ln -s "$STYLE_PATH/$resourceName" "$PNG_PATH"
   # Run sking generator
-  if [ $colorCorrection = "true" ];
-  then
-    "$BINARY_PATH" --symbolWidth $symbolSize --symbolHeight $symbolSize \
-        --symbolsDir "$DATA_PATH/styles/$styleType/style-$styleName/symbols" \
-        --skinName "$DATA_PATH/resources-$resourceName$suffix/basic" --skinSuffix="" \
-        --colorCorrection true
+  if [ $colorCorrection = "true" ]; then
+    COLOR_CORR="--colorCorrection true"
   else
-    "$BINARY_PATH" --symbolWidth $symbolSize --symbolHeight $symbolSize \
-        --symbolsDir "$DATA_PATH/styles/$styleType/style-$styleName/symbols" \
-        --skinName "$DATA_PATH/resources-$resourceName$suffix/basic" --skinSuffix=""
+    COLOR_CORR=
   fi
+
+  "$SKIN_GENERATOR" --symbolWidth $symbolSize --symbolHeight $symbolSize --symbolsDir "$STYLE_PATH/$symbolsFolder" \
+      --skinName "$DATA_PATH/resources-$resourceName$suffix/basic" --skinSuffix="$symbolsSuffix" $COLOR_CORR
   # Reset environment
-  rm -r $PNG_PATH || true
+  rm -r "$PNG_PATH" || true
 }
 
 # Cleanup
-cleanup=(resources-{yota,{6plus,ldpi,mdpi,hdpi,xhdpi,xxhdpi}{,_dark,_clear}})
+cleanup=(resources-{{6plus,mdpi,hdpi,xhdpi,xxhdpi,xxxhdpi}{_dark,_clear}})
 for item in ${cleanup[*]}
 do
-  rm -rf ../../data/$item || true
-  mkdir ../../data/$item
+  rm -rf "$DATA_PATH/$item" || true
+  mkdir "$DATA_PATH/$item"
 done
 
 # Build styles
 
-BuildSkin legacy yota  yota   19 true
+BuildSkin clear  night mdpi    18 false _dark symbols
+BuildSkin clear  night hdpi    27 false _dark symbols
+BuildSkin clear  night xhdpi   36 false _dark symbols
+BuildSkin clear  night xxhdpi  54 false _dark symbols
+BuildSkin clear  night 6plus   54 false _dark symbols
+BuildSkin clear  night xxxhdpi 64 false _dark symbols
 
-BuildSkin legacy light ldpi   16 false
-BuildSkin legacy light mdpi   16 false
-BuildSkin legacy light hdpi   24 false
-BuildSkin legacy light xhdpi  36 false
-BuildSkin legacy light xxhdpi 48 false
-BuildSkin legacy light 6plus  38 false
+BuildSkin clear  clear mdpi    18 false _clear symbols
+BuildSkin clear  clear hdpi    27 false _clear symbols
+BuildSkin clear  clear xhdpi   36 false _clear symbols
+BuildSkin clear  clear xxhdpi  54 false _clear symbols
+BuildSkin clear  clear 6plus   54 false _clear symbols
+BuildSkin clear  clear xxxhdpi 64 false _clear symbols
 
-BuildSkin clear  night ldpi   16 false _dark
-BuildSkin clear  night mdpi   16 false _dark
-BuildSkin clear  night hdpi   24 false _dark
-BuildSkin clear  night xhdpi  36 false _dark
-BuildSkin clear  night xxhdpi 48 false _dark
-BuildSkin clear  night 6plus  38 false _dark
+BuildSkin clear  night mdpi    22 false _dark symbols-ad -ad
+BuildSkin clear  night hdpi    34 false _dark symbols-ad -ad
+BuildSkin clear  night xhdpi   44 false _dark symbols-ad -ad
+BuildSkin clear  night xxhdpi  68 false _dark symbols-ad -ad
+BuildSkin clear  night 6plus   68 false _dark symbols-ad -ad
+BuildSkin clear  night xxxhdpi 78 false _dark symbols-ad -ad
 
-BuildSkin clear  clear ldpi   16 false _clear
-BuildSkin clear  clear mdpi   16 false _clear
-BuildSkin clear  clear hdpi   24 false _clear
-BuildSkin clear  clear xhdpi  36 false _clear
-BuildSkin clear  clear xxhdpi 48 false _clear
-BuildSkin clear  clear 6plus  38 false _clear
+BuildSkin clear  clear mdpi    22 false _clear symbols-ad -ad
+BuildSkin clear  clear hdpi    34 false _clear symbols-ad -ad
+BuildSkin clear  clear xhdpi   44 false _clear symbols-ad -ad
+BuildSkin clear  clear xxhdpi  68 false _clear symbols-ad -ad
+BuildSkin clear  clear 6plus   68 false _clear symbols-ad -ad
+BuildSkin clear  clear xxxhdpi 78 false _clear symbols-ad -ad
 
-# Success
-echo "Done"
-exit 0 # ok
+rm -rf "$OMIM_PATH"/data/resources-{*}
+
+rm -rf "$OMIM_PATH"/data/resources-*_design
+for i in mdpi hdpi xhdpi xxhdpi xxxhdpi 6plus; do
+  cp -r "$OMIM_PATH"/data/resources-${i}_clear/ "$OMIM_PATH"/data/resources-${i}_design/
+done
+
+echo "Generate local ads symbols"
+python "$LOCAL_ADS_SYMBOLS_GENERATOR" "$DATA_PATH/styles" "$DATA_PATH"

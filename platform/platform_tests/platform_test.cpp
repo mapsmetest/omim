@@ -1,5 +1,6 @@
 #include "testing/testing.hpp"
 
+#include "platform/mwm_version.hpp"
 #include "platform/platform.hpp"
 
 #include "defines.hpp"
@@ -22,9 +23,13 @@ char const * TEST_FILE_NAME = "some_temporary_unit_test_file.tmp";
 void CheckFilesPresence(string const & baseDir, unsigned typeMask,
                         initializer_list<pair<string, size_t>> const & files)
 {
-  Platform::FilesList filesList;
-  Platform::GetFilesByType(baseDir, typeMask, filesList);
-  multiset<string> filesSet(filesList.begin(), filesList.end());
+  Platform::TFilesWithType fwts;
+  Platform::GetFilesByType(baseDir, typeMask, fwts);
+
+  multiset<string> filesSet;
+  for (auto const & fwt : fwts)
+    filesSet.insert(fwt.first);
+
   for (auto const & file : files)
     TEST_EQUAL(filesSet.count(file.first), file.second, (file.first, file.second));
 }
@@ -40,7 +45,7 @@ UNIT_TEST(WritableDir)
   }
   catch (Writer::OpenException const &)
   {
-    LOG(LCRITICAL, ("Can't create file"));
+    LOG(LCRITICAL, ("Can't create file", path));
     return;
   }
 
@@ -59,7 +64,7 @@ UNIT_TEST(GetReader)
 {
   char const * NON_EXISTING_FILE = "mgbwuerhsnmbui45efhdbn34.tmp";
   char const * arr[] = {
-    "resources-ldpi/basic.skn",
+    "resources-mdpi_clear/symbols.sdf",
     "classificator.txt",
     "minsk-pass.mwm"
   };
@@ -88,10 +93,10 @@ UNIT_TEST(GetFilesInDir_Smoke)
   Platform & pl = GetPlatform();
   Platform::FilesList files1, files2;
 
-  string const dir = pl.WritableDir();
+  string const dir = pl.ResourcesDir();
 
   pl.GetFilesByExt(dir, DATA_FILE_EXTENSION, files1);
-  TEST_GREATER(files1.size(), 0, ("/data/ folder should contain some data files"));
+  TEST_GREATER(files1.size(), 0, (dir, "folder should contain some data files"));
 
   pl.GetFilesByRegExp(dir, ".*\\" DATA_FILE_EXTENSION "$", files2);
   TEST_EQUAL(files1, files2, ());
@@ -103,14 +108,22 @@ UNIT_TEST(GetFilesInDir_Smoke)
 
 UNIT_TEST(DirsRoutines)
 {
-  Platform & platform = GetPlatform();
-  string const baseDir = platform.WritableDir();
+  string const baseDir = GetPlatform().WritableDir();
   string const testDir = my::JoinFoldersToPath(baseDir, "test-dir");
+  string const testFile = my::JoinFoldersToPath(testDir, "test-file");
 
   TEST(!Platform::IsFileExistsByFullPath(testDir), ());
-  TEST_EQUAL(platform.MkDir(testDir), Platform::ERR_OK, ());
+  TEST_EQUAL(Platform::MkDir(testDir), Platform::ERR_OK, ());
 
   TEST(Platform::IsFileExistsByFullPath(testDir), ());
+  TEST(Platform::IsDirectoryEmpty(testDir), ());
+
+  {
+    FileWriter writer(testFile);
+  }
+  TEST(!Platform::IsDirectoryEmpty(testDir), ());
+  FileWriter::DeleteFileX(testFile);
+
   TEST_EQUAL(Platform::RmDir(testDir), Platform::ERR_OK, ());
 
   TEST(!Platform::IsFileExistsByFullPath(testDir), ());
@@ -121,11 +134,10 @@ UNIT_TEST(GetFilesByType)
   string const kTestDirBaseName = "test-dir";
   string const kTestFileBaseName = "test-file";
 
-  Platform & platform = GetPlatform();
-  string const baseDir = platform.WritableDir();
+  string const baseDir = GetPlatform().WritableDir();
 
   string const testDir = my::JoinFoldersToPath(baseDir, kTestDirBaseName);
-  TEST_EQUAL(platform.MkDir(testDir), Platform::ERR_OK, ());
+  TEST_EQUAL(Platform::MkDir(testDir), Platform::ERR_OK, ());
   MY_SCOPE_GUARD(removeTestDir, bind(&Platform::RmDir, testDir));
 
   string const testFile = my::JoinFoldersToPath(baseDir, kTestFileBaseName);
@@ -166,15 +178,16 @@ UNIT_TEST(GetFileSize)
   TEST(!pl.GetFileSizeByName("adsmngfuwrbfyfwe", size), ());
   TEST(!pl.IsFileExistsByFullPath("adsmngfuwrbfyfwe"), ());
 
+  string const fileName = pl.WritablePathForFile(TEST_FILE_NAME);
   {
-    FileWriter testFile(TEST_FILE_NAME);
+    FileWriter testFile(fileName);
     testFile.Write("HOHOHO", 6);
   }
   size = 0;
-  TEST(Platform::GetFileSizeByFullPath(TEST_FILE_NAME, size), ());
+  TEST(Platform::GetFileSizeByFullPath(fileName, size), ());
   TEST_EQUAL(size, 6, ());
 
-  FileWriter::DeleteFileX(TEST_FILE_NAME);
+  FileWriter::DeleteFileX(fileName);
 
   {
     FileWriter testFile(pl.WritablePathForFile(TEST_FILE_NAME));
@@ -198,4 +211,46 @@ UNIT_TEST(GetWritableStorageStatus)
 {
   TEST_EQUAL(Platform::STORAGE_OK, GetPlatform().GetWritableStorageStatus(100000), ());
   TEST_EQUAL(Platform::NOT_ENOUGH_SPACE, GetPlatform().GetWritableStorageStatus(uint64_t(-1)), ());
+}
+
+UNIT_TEST(RmDirRecursively)
+{
+  string const testDir1 = my::JoinFoldersToPath(GetPlatform().WritableDir(), "test_dir1");
+  TEST_EQUAL(Platform::MkDir(testDir1), Platform::ERR_OK, ());
+  MY_SCOPE_GUARD(removeTestDir1, bind(&Platform::RmDir, testDir1));
+
+  string const testDir2 = my::JoinFoldersToPath(testDir1, "test_dir2");
+  TEST_EQUAL(Platform::MkDir(testDir2), Platform::ERR_OK, ());
+  MY_SCOPE_GUARD(removeTestDir2, bind(&Platform::RmDir, testDir2));
+
+  string const filePath = my::JoinFoldersToPath(testDir2, "test_file");
+  {
+    FileWriter testFile(filePath);
+    testFile.Write("HOHOHO", 6);
+  }
+  MY_SCOPE_GUARD(removeTestFile, bind(&my::DeleteFileX, filePath));
+
+  TEST(Platform::IsFileExistsByFullPath(filePath), ());
+  TEST(Platform::IsFileExistsByFullPath(testDir1), ());
+  TEST(Platform::IsFileExistsByFullPath(testDir2), ());
+
+  TEST_EQUAL(Platform::ERR_DIRECTORY_NOT_EMPTY, Platform::RmDir(testDir1), ());
+
+  TEST(Platform::IsFileExistsByFullPath(filePath), ());
+  TEST(Platform::IsFileExistsByFullPath(testDir1), ());
+  TEST(Platform::IsFileExistsByFullPath(testDir2), ());
+
+  TEST(Platform::RmDirRecursively(testDir1), ());
+
+  TEST(!Platform::IsFileExistsByFullPath(filePath), ());
+  TEST(!Platform::IsFileExistsByFullPath(testDir1), ());
+  TEST(!Platform::IsFileExistsByFullPath(testDir2), ());
+}
+
+UNIT_TEST(IsSingleMwm)
+{
+  TEST(version::IsSingleMwm(version::FOR_TESTING_SINGLE_MWM1), ());
+  TEST(version::IsSingleMwm(version::FOR_TESTING_SINGLE_MWM_LATEST), ());
+  TEST(!version::IsSingleMwm(version::FOR_TESTING_TWO_COMPONENT_MWM1), ());
+  TEST(!version::IsSingleMwm(version::FOR_TESTING_TWO_COMPONENT_MWM2), ());
 }

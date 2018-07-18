@@ -1,8 +1,9 @@
 // Boost.Geometry (aka GGL, Generic Geometry Library)
 
-// Copyright (c) 2014-2015, Oracle and/or its affiliates.
+// Copyright (c) 2014-2017, Oracle and/or its affiliates.
 
 // Contributed and/or modified by Menelaos Karavelas, on behalf of Oracle
+// Contributed and/or modified by Adam Wulkiewicz, on behalf of Oracle
 
 // Licensed under the Boost Software License version 1.0.
 // http://www.boost.org/users/license.html
@@ -13,6 +14,7 @@
 #include <deque>
 #include <vector>
 
+#include <boost/core/ignore_unused.hpp>
 #include <boost/iterator/filter_iterator.hpp>
 #include <boost/range.hpp>
 
@@ -21,6 +23,7 @@
 #include <boost/geometry/core/ring_type.hpp>
 #include <boost/geometry/core/tags.hpp>
 
+#include <boost/geometry/util/condition.hpp>
 #include <boost/geometry/util/range.hpp>
 
 #include <boost/geometry/geometries/box.hpp>
@@ -39,6 +42,8 @@
 #include <boost/geometry/algorithms/detail/is_valid/debug_validity_phase.hpp>
 
 #include <boost/geometry/algorithms/dispatch/is_valid.hpp>
+
+#include <boost/geometry/strategies/intersection.hpp>
 
 
 namespace boost { namespace geometry
@@ -80,8 +85,10 @@ private:
                                         TurnIterator turns_beyond,
                                         VisitPolicy& visitor)
     {
+        boost::ignore_unused(visitor);
+
         // collect all polygons that have turns
-        std::set<signed_index_type> multi_indices;
+        std::set<signed_size_type> multi_indices;
         for (TurnIterator tit = turns_first; tit != turns_beyond; ++tit)
         {
             multi_indices.insert(tit->operations[0].seg_id.multi_index);
@@ -90,7 +97,7 @@ private:
 
         // put polygon iterators without turns in a vector
         std::vector<PolygonIterator> polygon_iterators;
-        signed_index_type multi_index = 0;
+        signed_size_type multi_index = 0;
         for (PolygonIterator it = polygons_first; it != polygons_beyond;
              ++it, ++multi_index)
         {
@@ -104,10 +111,10 @@ private:
 
         geometry::partition
             <
-                geometry::model::box<typename point_type<MultiPolygon>::type>,
-                typename base::expand_box,
-                typename base::overlaps_box
-            >::apply(polygon_iterators, item_visitor);
+                geometry::model::box<typename point_type<MultiPolygon>::type>
+            >::apply(polygon_iterators, item_visitor,
+                     typename base::expand_box(),
+                     typename base::overlaps_box());
 
         if (item_visitor.items_overlap)
         {
@@ -124,7 +131,7 @@ private:
     class has_multi_index
     {
     public:
-        has_multi_index(signed_index_type multi_index)
+        has_multi_index(signed_size_type multi_index)
             : m_multi_index(multi_index)
         {}
 
@@ -136,7 +143,7 @@ private:
         }
 
     private:
-        signed_index_type const m_multi_index;
+        signed_size_type const m_multi_index;
     };
 
 
@@ -156,7 +163,7 @@ private:
                                  TurnIterator turns_beyond,
                                  VisitPolicy& visitor)
         {
-            signed_index_type multi_index = 0;
+            signed_size_type multi_index = 0;
             for (PolygonIterator it = polygons_first; it != polygons_beyond;
                  ++it, ++multi_index)
             {
@@ -230,27 +237,33 @@ private:
     }
 
 
-    template <typename VisitPolicy>
+    template <typename VisitPolicy, typename Strategy>
     struct per_polygon
     {
-        per_polygon(VisitPolicy& policy) : m_policy(policy) {}
+        per_polygon(VisitPolicy& policy, Strategy const& strategy)
+            : m_policy(policy)
+            , m_strategy(strategy)
+        {}
 
         template <typename Polygon>
         inline bool apply(Polygon const& polygon) const
         {
-            return base::apply(polygon, m_policy);
+            return base::apply(polygon, m_policy, m_strategy);
         }
 
         VisitPolicy& m_policy;
+        Strategy const& m_strategy;
     };
 public:
-    template <typename VisitPolicy>
+    template <typename VisitPolicy, typename Strategy>
     static inline bool apply(MultiPolygon const& multipolygon,
-                             VisitPolicy& visitor)
+                             VisitPolicy& visitor,
+                             Strategy const& strategy)
     {
         typedef debug_validity_phase<MultiPolygon> debug_phase;
 
-        if (AllowEmptyMultiGeometries && boost::empty(multipolygon))
+        if (BOOST_GEOMETRY_CONDITION(
+                AllowEmptyMultiGeometries && boost::empty(multipolygon)))
         {
             return visitor.template apply<no_failure>();
         }
@@ -260,11 +273,11 @@ public:
 
         if (! detail::check_iterator_range
                   <
-                      per_polygon<VisitPolicy>,
+                      per_polygon<VisitPolicy, Strategy>,
                       false // do not check for empty multipolygon (done above)
                   >::apply(boost::begin(multipolygon),
                            boost::end(multipolygon),
-                           per_polygon<VisitPolicy>(visitor)))
+                           per_polygon<VisitPolicy, Strategy>(visitor, strategy)))
         {
             return false;
         }
@@ -277,7 +290,7 @@ public:
 
         std::deque<typename has_valid_turns::turn_type> turns;
         bool has_invalid_turns =
-            ! has_valid_turns::apply(multipolygon, turns, visitor);
+            ! has_valid_turns::apply(multipolygon, turns, visitor, strategy);
         debug_print_turns(turns.begin(), turns.end());
 
         if (has_invalid_turns)

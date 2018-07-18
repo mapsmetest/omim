@@ -1,27 +1,97 @@
 package com.mapswithme.maps.base;
 
+import android.app.Activity;
+import android.content.Intent;
+import android.media.AudioManager;
 import android.os.Bundle;
+import android.support.annotation.CallSuper;
+import android.support.annotation.ColorRes;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
+import android.support.annotation.StyleRes;
 import android.support.v4.app.Fragment;
-import android.support.v4.app.FragmentTransaction;
+import android.support.v4.app.FragmentManager;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.Toolbar;
 import android.view.MenuItem;
 
-import com.mapswithme.util.ViewServer;
 import com.mapswithme.maps.MwmApplication;
 import com.mapswithme.maps.R;
+import com.mapswithme.maps.SplashActivity;
+import com.mapswithme.util.Config;
+import com.mapswithme.util.PermissionsUtils;
+import com.mapswithme.util.ThemeUtils;
+import com.mapswithme.util.UiUtils;
 import com.mapswithme.util.Utils;
-import com.mapswithme.util.statistics.Statistics;
 
-public class BaseMwmFragmentActivity extends AppCompatActivity
+public abstract class BaseMwmFragmentActivity extends AppCompatActivity
+                                  implements BaseActivity
 {
+  private final BaseActivityDelegate mBaseDelegate = new BaseActivityDelegate(this);
+
+  private boolean mInitializationCompleted = false;
+
   @Override
-  protected void onCreate(Bundle savedInstanceState)
+  @NonNull
+  public Activity get()
   {
+    return this;
+  }
+
+  @Override
+  @StyleRes
+  public int getThemeResourceId(@NonNull String theme)
+  {
+    if (ThemeUtils.isDefaultTheme(theme))
+        return R.style.MwmTheme;
+
+    if (ThemeUtils.isNightTheme(theme))
+      return R.style.MwmTheme_Night;
+
+    throw new IllegalArgumentException("Attempt to apply unsupported theme: " + theme);
+  }
+
+  /**
+   * Shows splash screen and initializes the core in case when it was not initialized.
+   *
+   * Do not override this method!
+   * Use {@link #safeOnCreate(Bundle savedInstanceState)}
+   */
+  @CallSuper
+  @Override
+  protected final void onCreate(@Nullable Bundle savedInstanceState)
+  {
+    if (!MwmApplication.get().arePlatformAndCoreInitialized()
+        || !PermissionsUtils.isExternalStorageGranted())
+    {
+      super.onCreate(savedInstanceState);
+      goToSplashScreen(getIntent());
+      return;
+    }
+    mInitializationCompleted = true;
+
+    mBaseDelegate.onCreate();
     super.onCreate(savedInstanceState);
+
+    safeOnCreate(savedInstanceState);
+  }
+
+  /**
+   * Use this safe method instead of {@link #onCreate(Bundle savedInstanceState)}.
+   * When this method is called, the core is already initialized.
+   */
+  @CallSuper
+  protected void safeOnCreate(@Nullable Bundle savedInstanceState)
+  {
+    setVolumeControlStream(AudioManager.STREAM_MUSIC);
     final int layoutId = getContentLayoutResId();
     if (layoutId != 0)
       setContentView(layoutId);
+
+    if (useTransparentStatusBar())
+      UiUtils.setupStatusBar(this);
+    if (useColorStatusBar())
+      UiUtils.setupColorStatusBar(this, getStatusBarColor());
 
     // Use full-screen on Kindle Fire only
     if (Utils.isAmazonDevice())
@@ -30,32 +100,75 @@ public class BaseMwmFragmentActivity extends AppCompatActivity
       getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN);
     }
 
-    MwmApplication.get().initNativeCore();
-    MwmApplication.get().initCounters();
-    ViewServer.get(this).addWindow(this);
-
     attachDefaultFragment();
   }
 
+  protected boolean isInitializationCompleted()
+  {
+    return mInitializationCompleted;
+  }
+
+  @ColorRes
+  protected int getStatusBarColor()
+  {
+    String theme = Config.getCurrentUiTheme();
+    if (ThemeUtils.isDefaultTheme(theme))
+      return R.color.bg_statusbar;
+
+    if (ThemeUtils.isNightTheme(theme))
+      return R.color.bg_statusbar_night;
+
+    throw new IllegalArgumentException("Attempt to apply unsupported theme: " + theme);
+  }
+
+  protected boolean useColorStatusBar()
+  {
+    return false;
+  }
+
+  protected boolean useTransparentStatusBar()
+  {
+    return true;
+  }
+
+  @CallSuper
+  @Override
+  protected void onNewIntent(Intent intent)
+  {
+    super.onNewIntent(intent);
+    mBaseDelegate.onNewIntent(intent);
+  }
+
+  @CallSuper
+  @Override
+  protected void onPostCreate(@Nullable Bundle savedInstanceState)
+  {
+    super.onPostCreate(savedInstanceState);
+    mBaseDelegate.onPostCreate();
+  }
+
+  @CallSuper
   @Override
   protected void onDestroy()
   {
     super.onDestroy();
-    ViewServer.get(this).removeWindow(this);
+    mBaseDelegate.onDestroy();
   }
 
+  @CallSuper
   @Override
   protected void onStart()
   {
     super.onStart();
-    Statistics.INSTANCE.startActivity(this);
+    mBaseDelegate.onStart();
   }
 
+  @CallSuper
   @Override
   protected void onStop()
   {
     super.onStop();
-    Statistics.INSTANCE.stopActivity(this);
+    mBaseDelegate.onStop();
   }
 
   @Override
@@ -66,24 +179,37 @@ public class BaseMwmFragmentActivity extends AppCompatActivity
       onBackPressed();
       return true;
     }
-    else
-      return super.onOptionsItemSelected(item);
+    return super.onOptionsItemSelected(item);
   }
 
+  @CallSuper
   @Override
   protected void onResume()
   {
     super.onResume();
-    org.alohalytics.Statistics.logEvent("$onResume", this.getClass().getSimpleName()
-        + ":" + com.mapswithme.util.UiUtils.deviceOrientationAsString(this));
-    ViewServer.get(this).setFocusedWindow(this);
+    if (!PermissionsUtils.isExternalStorageGranted())
+    {
+      goToSplashScreen(null);
+      return;
+    }
+
+    mBaseDelegate.onResume();
   }
 
+  @CallSuper
+  @Override
+  protected void onPostResume()
+  {
+    super.onPostResume();
+    mBaseDelegate.onPostResume();
+  }
+
+  @CallSuper
   @Override
   protected void onPause()
   {
     super.onPause();
-    org.alohalytics.Statistics.logEvent("$onPause", this.getClass().getSimpleName());
+    mBaseDelegate.onPause();
   }
 
   protected Toolbar getToolbar()
@@ -94,6 +220,36 @@ public class BaseMwmFragmentActivity extends AppCompatActivity
   protected void displayToolbarAsActionBar()
   {
     setSupportActionBar(getToolbar());
+  }
+
+  @Override
+  public void onBackPressed()
+  {
+    if (getFragmentClass() == null)
+    {
+      super.onBackPressed();
+      return;
+    }
+    FragmentManager manager = getSupportFragmentManager();
+    String name = getFragmentClass().getName();
+    Fragment fragment = manager.findFragmentByTag(name);
+
+    if (fragment == null)
+    {
+      super.onBackPressed();
+      return;
+    }
+
+    if (onBackPressedInternal(fragment))
+    {
+      return;
+    }
+    super.onBackPressed();
+  }
+
+  protected boolean onBackPressedInternal(@NonNull Fragment currentFragment)
+  {
+    return false;
   }
 
   /**
@@ -109,26 +265,26 @@ public class BaseMwmFragmentActivity extends AppCompatActivity
   {
     Class<? extends Fragment> clazz = getFragmentClass();
     if (clazz != null)
-      replaceFragment(clazz, false, getIntent().getExtras());
+      replaceFragment(clazz, getIntent().getExtras(), null);
   }
 
   /**
    * Replace attached fragment with the new one.
    */
-  public void replaceFragment(Class<? extends Fragment> fragmentClass, boolean addToBackStack, Bundle args)
+  public void replaceFragment(@NonNull Class<? extends Fragment> fragmentClass, @Nullable Bundle args, @Nullable Runnable completionListener)
   {
     final int resId = getFragmentContentResId();
     if (resId <= 0 || findViewById(resId) == null)
       throw new IllegalStateException("Fragment can't be added, since getFragmentContentResId() isn't implemented or returns wrong resourceId.");
 
-    final FragmentTransaction transaction = getSupportFragmentManager().beginTransaction();
-
     String name = fragmentClass.getName();
     final Fragment fragment = Fragment.instantiate(this, name, args);
-    transaction.replace(resId, fragment, name);
-    if (addToBackStack)
-      transaction.addToBackStack(null);
-    transaction.commit();
+    getSupportFragmentManager().beginTransaction()
+                               .replace(resId, fragment, name)
+                               .commitAllowingStateLoss();
+    getSupportFragmentManager().executePendingTransactions();
+    if (completionListener != null)
+      completionListener.run();
   }
 
   /**
@@ -148,5 +304,11 @@ public class BaseMwmFragmentActivity extends AppCompatActivity
   protected int getFragmentContentResId()
   {
     return android.R.id.content;
+  }
+
+  private void goToSplashScreen(@Nullable Intent initialIntent)
+  {
+    SplashActivity.start(this, getClass(), initialIntent);
+    finish();
   }
 }

@@ -1,10 +1,8 @@
 package com.mapswithme.maps.widget;
 
 import android.animation.Animator;
-import android.animation.ObjectAnimator;
 import android.content.Context;
 import android.support.annotation.NonNull;
-import android.support.v4.view.ViewCompat;
 import android.util.AttributeSet;
 import android.view.MotionEvent;
 import android.widget.FrameLayout;
@@ -19,19 +17,30 @@ public class FadeView extends FrameLayout
   private static final String PROPERTY_ALPHA = "alpha";
   private static final int DURATION = MwmApplication.get().getResources().getInteger(R.integer.anim_fade_main);
   
+  private final Animator.AnimatorListener mFadeInListener = new UiUtils.SimpleAnimatorListener()
+  {
+    @Override
+    public void onAnimationEnd(Animator animation)
+    {
+      UiUtils.show(FadeView.this);
+      animation.removeListener(this);
+    }
+  };
+
   private final Animator.AnimatorListener mFadeOutListener = new UiUtils.SimpleAnimatorListener()
   {
     @Override
     public void onAnimationEnd(Animator animation)
     {
       UiUtils.hide(FadeView.this);
+      animation.removeListener(this);
     }
   };
 
 
   public interface Listener
   {
-    void onTouch();
+    boolean onTouch();
   }
 
   private Listener mListener;
@@ -58,35 +67,31 @@ public class FadeView extends FrameLayout
 
   public void fadeIn()
   {
+    setAlpha(0.0f);
     UiUtils.show(this);
-
-    ObjectAnimator animation = ObjectAnimator.ofFloat(this, PROPERTY_ALPHA, 0f, FADE_ALPHA_VALUE);
-    animation.setDuration(DURATION);
-    animation.start();
+    animate().alpha(FADE_ALPHA_VALUE)
+             .setDuration(DURATION)
+             .setListener(mFadeInListener)
+             .start();
   }
 
-  public void fadeOut(boolean notify)
+  public void fadeOut()
   {
-    if (mListener != null && notify)
-      mListener.onTouch();
-
-    ObjectAnimator animation = ObjectAnimator.ofFloat(this, PROPERTY_ALPHA, FADE_ALPHA_VALUE, 0f);
-    animation.addListener(mFadeOutListener);
-    animation.setDuration(DURATION);
-    animation.start();
-  }
-
-  public void fadeInInstantly()
-  {
-    UiUtils.show(this);
     setAlpha(FADE_ALPHA_VALUE);
+    animate().alpha(0.0f)
+             .setDuration(DURATION)
+             .setListener(mFadeOutListener)
+             .start();
   }
 
   @Override
   public boolean onTouchEvent(@NonNull MotionEvent event)
   {
-    if (event.getAction() == MotionEvent.ACTION_DOWN)
-      fadeOut(true);
+    if (event.getAction() != MotionEvent.ACTION_DOWN)
+      return true;
+
+    if (mListener == null || mListener.onTouch())
+      fadeOut();
 
     return true;
   }

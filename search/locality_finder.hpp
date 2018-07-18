@@ -1,84 +1,143 @@
 #pragma once
 
-#include "indexer/index.hpp"
+#include "search/cities_boundaries_table.hpp"
+
+#include "indexer/mwm_set.hpp"
+#include "indexer/rank_table.hpp"
+
+#include "coding/multilang_utf8_string.hpp"
 
 #include "geometry/point2d.hpp"
 #include "geometry/rect2d.hpp"
 #include "geometry/tree4d.hpp"
 
-#include "std/set.hpp"
+#include "base/macros.hpp"
 
+#include <cstdint>
+#include <limits>
+#include <map>
+#include <memory>
+#include <unordered_set>
+#include <utility>
 
-class Index;
+class DataSource;
 
 namespace search
 {
+class VillagesCache;
 
 struct LocalityItem
 {
-  m2::RectD m_rect;
-  string m_name;
-  uint32_t m_population;
+  using Boundaries = CitiesBoundariesTable::Boundaries;
 
-  typedef uint32_t ID;
-  ID m_id;
+  LocalityItem(StringUtf8Multilang const & names, m2::PointD const & center,
+               Boundaries const & boundaries, uint64_t population, FeatureID const & id);
 
-  LocalityItem(m2::RectD const & rect, uint32_t population, ID id, string const & name);
+  bool GetName(int8_t lang, string & name) const { return m_names.GetString(lang, name); }
 
-  m2::RectD const & GetLimitRect() const { return m_rect; }
+  bool GetSpecifiedOrDefaultName(int8_t lang, string & name) const
+  {
+    return GetName(lang, name) || GetName(StringUtf8Multilang::kDefaultCode, name);
+  }
+
+  StringUtf8Multilang m_names;
+  m2::PointD m_center;
+  Boundaries m_boundaries;
+  uint64_t m_population;
+  FeatureID m_id;
+};
+
+string DebugPrint(LocalityItem const & item);
+
+class LocalitySelector
+{
+public:
+  LocalitySelector(m2::PointD const & p);
+
+  void operator()(LocalityItem const & item);
+
+  template <typename Fn>
+  bool WithBestLocality(Fn && fn) const
+  {
+    if (!m_locality)
+      return false;
+    fn(*m_locality);
+    return true;
+  }
+
+private:
+  m2::PointD const m_p;
+
+  bool m_inside = false;
+  double m_score = std::numeric_limits<double>::max();
+  LocalityItem const * m_locality = nullptr;
 };
 
 class LocalityFinder
 {
-  struct Cache
+public:
+  class Holder
   {
-    m4::Tree<LocalityItem> m_tree;
-    set<LocalityItem::ID> m_loaded;
-    mutable uint32_t m_usage;
-    m2::RectD m_rect;
+  public:
+    Holder(double radiusMeters);
 
-    Cache() : m_usage(0) {}
+    bool IsCovered(m2::RectD const & rect) const;
+    void SetCovered(m2::PointD const & p);
+
+    void Add(LocalityItem const & item);
+    void ForEachInVicinity(m2::RectD const & rect, LocalitySelector & selector) const;
+
+    m2::RectD GetRect(m2::PointD const & p) const;
+    m2::RectD GetDRect(m2::PointD const & p) const;
 
     void Clear();
-    void GetLocality(m2::PointD const & pt, string & name) const;
+
+  private:
+    double const m_radiusMeters;
+    m4::Tree<bool> m_coverage;
+    m4::Tree<LocalityItem> m_localities;
+
+    DISALLOW_COPY_AND_MOVE(Holder);
   };
 
-public:
-  LocalityFinder(Index const * pIndex);
+  LocalityFinder(DataSource const & dataSource, CitiesBoundariesTable const & boundaries,
+                 VillagesCache & villagesCache);
 
-  void SetLanguage(int8_t lang)
+  template <typename Fn>
+  bool GetLocality(m2::PointD const & p, Fn && fn)
   {
-    if (m_lang != lang)
-    {
-      ClearCacheAll();
-      m_lang = lang;
-    }
+    m2::RectD const crect = m_cities.GetRect(p);
+    m2::RectD const vrect = m_villages.GetRect(p);
+
+    LoadVicinity(p, !m_cities.IsCovered(crect) /* loadCities */,
+                 !m_villages.IsCovered(vrect) /* loadVillages */);
+
+    LocalitySelector selector(p);
+    m_cities.ForEachInVicinity(crect, selector);
+    m_villages.ForEachInVicinity(vrect, selector);
+
+    return selector.WithBestLocality(std::forward<Fn>(fn));
   }
 
-  void SetViewportByIndex(m2::RectD const & rect, size_t idx);
-
-  /// Check for localities in pre-cached viewports only.
-  void GetLocalityInViewport(m2::PointD const & pt, string & name) const;
-  /// Checl for localities in all Index and make new cache if needed.
-  void GetLocalityCreateCache(m2::PointD const & pt, string & name) const;
-
-  void ClearCacheAll();
-  void ClearCache(size_t idx);
-
-protected:
-  void CorrectMinimalRect(m2::RectD & rect) const;
-  void RecreateCache(Cache & cache, m2::RectD rect) const;
+  void ClearCache();
 
 private:
-  friend class DoLoader;
+  void LoadVicinity(m2::PointD const & p, bool loadCities, bool loadVillages);
+  void UpdateMaps();
 
-  Index const * m_pIndex;
+  DataSource const & m_dataSource;
+  CitiesBoundariesTable const & m_boundariesTable;
+  VillagesCache & m_villagesCache;
 
-  enum { MAX_VIEWPORT_COUNT = 3, MAX_CACHE_TMP_COUNT = 4};
-  Cache m_cache[MAX_VIEWPORT_COUNT];
-  mutable Cache m_cache_tmp[MAX_CACHE_TMP_COUNT];
+  Holder m_cities;
+  Holder m_villages;
 
-  int8_t m_lang;
+  m4::Tree<MwmSet::MwmId> m_maps;
+  MwmSet::MwmId m_worldId;
+  bool m_mapsLoaded;
+
+  std::unique_ptr<RankTable> m_ranks;
+
+  std::map<MwmSet::MwmId, std::unordered_set<uint32_t>> m_loadedIds;
 };
-
-}
+}  // namespace search

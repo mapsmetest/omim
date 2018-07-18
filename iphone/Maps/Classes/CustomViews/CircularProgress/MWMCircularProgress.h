@@ -1,20 +1,14 @@
-#import <Foundation/Foundation.h>
+#import "MWMCircularProgress+Swift.h"
 
-@class MWMCircularProgress;
+#include "std/vector.hpp"
 
-@protocol MWMCircularProgressDelegate <NSObject>
+using MWMCircularProgressStateVec = vector<MWMCircularProgressState>;
 
-- (void)progressButtonPressed:(nonnull MWMCircularProgress *)progress;
+@interface MWMCircularProgress ()
 
-@end
-
-@interface MWMCircularProgress : NSObject
-
-@property (nonatomic) CGFloat progress;
-@property (nonatomic) BOOL failed;
-
-- (nonnull instancetype)init __attribute__((unavailable("init is not available")));
-- (nonnull instancetype)initWithParentView:(nonnull UIView *)parentView delegate:(nonnull id <MWMCircularProgressDelegate>)delegate;
-- (void)reset;
-
+- (void)setImageName:(nullable NSString *)imageName
+           forStates:(MWMCircularProgressStateVec const &)states;
+- (void)setColor:(nonnull UIColor *)color forStates:(MWMCircularProgressStateVec const &)states;
+- (void)setColoring:(MWMButtonColoring)coloring
+          forStates:(MWMCircularProgressStateVec const &)states;
 @end

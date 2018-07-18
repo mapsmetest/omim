@@ -15,7 +15,7 @@
   self = [super initWithFrame:frame];
   if (self)
   {
-    self.circleColor = color;
+    _circleColor = color;
     self.opaque = NO;
   }
   return self;
@@ -25,15 +25,15 @@
 {
   CGContextRef ctx = UIGraphicsGetCurrentContext();
   CGContextAddEllipseInRect(ctx, rect);
-  CGContextSetFillColor(ctx, CGColorGetComponents([self.circleColor CGColor]));
+  CGContextSetFillColor(ctx, CGColorGetComponents(self.circleColor.CGColor));
   CGContextFillPath(ctx);
 }
 
 + (UIView *)createViewWithCircleDiameter:(CGFloat)diameter andColor:(UIColor *)color
 {
   UIView * circleView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, diameter, diameter)];
-  circleView.backgroundColor = [UIColor clearColor];
-  CircleView * circle = [[CircleView alloc] initWithFrame:CGRectMake(0.5, 0.5, diameter - 1, diameter - 1) andColor:color];
+  circleView.backgroundColor = UIColor.clearColor;
+  CircleView * circle = [[self alloc] initWithFrame:CGRectMake(0.5, 0.5, diameter - 1, diameter - 1) andColor:color];
   [circleView addSubview:circle];
   return circleView;
 }
@@ -55,7 +55,8 @@
 + (UIImage *)imageWithView:(UIView *)view
 {
   UIGraphicsBeginImageContextWithOptions(view.bounds.size, NO, 0.0);
-  [view.layer renderInContext:UIGraphicsGetCurrentContext()];
+  CGContextRef context = UIGraphicsGetCurrentContext();
+  [view.layer renderInContext:context];
 
   UIImage * img = UIGraphicsGetImageFromCurrentImageContext();
 

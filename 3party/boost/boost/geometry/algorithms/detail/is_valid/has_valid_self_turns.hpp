@@ -1,8 +1,9 @@
 // Boost.Geometry (aka GGL, Generic Geometry Library)
 
-// Copyright (c) 2014-2015, Oracle and/or its affiliates.
+// Copyright (c) 2014-2017, Oracle and/or its affiliates.
 
 // Contributed and/or modified by Menelaos Karavelas, on behalf of Oracle
+// Contributed and/or modified by Adam Wulkiewicz, on behalf of Oracle
 
 // Licensed under the Boost Software License version 1.0.
 // http://www.boost.org/users/license.html
@@ -12,6 +13,7 @@
 
 #include <vector>
 
+#include <boost/core/ignore_unused.hpp>
 #include <boost/range.hpp>
 
 #include <boost/geometry/core/assert.hpp>
@@ -68,11 +70,14 @@ public:
         > turn_type;
 
     // returns true if all turns are valid
-    template <typename Turns, typename VisitPolicy>
+    template <typename Turns, typename VisitPolicy, typename Strategy>
     static inline bool apply(Geometry const& geometry,
                              Turns& turns,
-                             VisitPolicy& visitor)
+                             VisitPolicy& visitor,
+                             Strategy const& strategy)
     {
+        boost::ignore_unused(visitor);
+
         rescale_policy_type robust_policy
             = geometry::get_rescale_policy<rescale_policy_type>(geometry);
 
@@ -82,6 +87,7 @@ public:
             > interrupt_policy;
 
         geometry::self_turns<turn_policy>(geometry,
+                                          strategy,
                                           robust_policy,
                                           turns,
                                           interrupt_policy);
@@ -98,11 +104,11 @@ public:
     }
 
     // returns true if all turns are valid
-    template <typename VisitPolicy>
-    static inline bool apply(Geometry const& geometry, VisitPolicy& visitor)
+    template <typename VisitPolicy, typename Strategy>
+    static inline bool apply(Geometry const& geometry, VisitPolicy& visitor, Strategy const& strategy)
     {
         std::vector<turn_type> turns;
-        return apply(geometry, turns, visitor);
+        return apply(geometry, turns, visitor, strategy);
     }
 };
 

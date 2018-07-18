@@ -1,46 +1,38 @@
-#import "LocationManager.h"
-#import "MWMNavigationViewProtocol.h"
+#import "MWMBottomMenuView.h"
+#import "MWMNavigationDashboardObserver.h"
+#import "MWMTaxiPreviewDataSource.h"
 
-#include "Framework.h"
-#include "platform/location.hpp"
-
-typedef NS_ENUM(NSUInteger, MWMNavigationDashboardState)
-{
+typedef NS_ENUM(NSUInteger, MWMNavigationDashboardState) {
   MWMNavigationDashboardStateHidden,
+  MWMNavigationDashboardStatePrepare,
   MWMNavigationDashboardStatePlanning,
   MWMNavigationDashboardStateError,
   MWMNavigationDashboardStateReady,
   MWMNavigationDashboardStateNavigation
 };
 
-@protocol MWMNavigationDashboardManagerProtocol <MWMNavigationViewProtocol>
+@interface MWMNavigationDashboardManager : NSObject
 
-- (void)buildRouteWithType:(enum routing::RouterType)type;
-- (void)didStartFollowing;
-- (void)didCancelRouting;
-- (void)updateStatusBarStyle;
++ (MWMNavigationDashboardManager *)manager;
++ (void)addObserver:(id<MWMNavigationDashboardObserver>)observer;
++ (void)removeObserver:(id<MWMNavigationDashboardObserver>)observer;
 
-@end
-
-@class MWMNavigationDashboardEntity;
-
-@interface MWMNavigationDashboardManager : NSObject <LocationObserver>
-
-@property (nonatomic, readonly) MWMNavigationDashboardEntity * entity;
-@property (nonatomic) MWMNavigationDashboardState state;
-@property (nonatomic) CGFloat topBound;
-@property (nonatomic) CGFloat leftBound;
-@property (nonatomic, readonly) CGFloat height;
+@property(nonatomic, readonly) MWMNavigationDashboardState state;
+@property(nonatomic, readonly) MWMTaxiPreviewDataSource * taxiDataSource;
 
 - (instancetype)init __attribute__((unavailable("init is not available")));
-- (instancetype)initWithParentView:(UIView *)view delegate:(id<MWMNavigationDashboardManagerProtocol>)delegate;
-- (void)setupDashboard:(location::FollowingInfo const &)info;
-- (void)playTurnNotifications;
-- (void)willRotateToInterfaceOrientation:(UIInterfaceOrientation)orientation;
-- (void)viewWillTransitionToSize:(CGSize)size
-       withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator;
-- (void)setRouteBuildingProgress:(CGFloat)progress;
-- (void)showHelperPanels;
-- (void)hideHelperPanels;
+- (instancetype)initWithParentView:(UIView *)view;
+- (void)setRouteBuilderProgress:(CGFloat)progress;
+- (void)mwm_refreshUI;
+
+- (void)onRoutePrepare;
+- (void)onRoutePlanning;
+- (void)onRouteError:(NSString *)error;
+- (void)onRouteReady;
+- (void)onRouteStart;
+- (void)onRouteStop;
+- (void)onRoutePointsUpdated;
+
++ (void)updateNavigationInfoAvailableArea:(CGRect)frame;
 
 @end

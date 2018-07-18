@@ -6,7 +6,7 @@
 
 #include "indexer/cell_id.hpp"
 #include "indexer/data_header.hpp"
-#include "indexer/mercator.hpp"
+#include "geometry/mercator.hpp"
 
 #include "coding/varint.hpp"
 
@@ -14,9 +14,9 @@
 #include "base/logging.hpp"
 #include "base/stl_add.hpp"
 
-#include "std/bind.hpp"
+#include <functional>
 #include "std/target_os.hpp"
-#include "std/unordered_map.hpp"
+#include <unordered_map>
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // FeaturesCollector implementation
@@ -24,7 +24,7 @@
 namespace feature
 {
 
-FeaturesCollector::FeaturesCollector(string const & fName)
+FeaturesCollector::FeaturesCollector(std::string const & fName)
   : m_datFile(fName)
 {
   CHECK_EQUAL(GetFileSize(m_datFile), 0, ());
@@ -37,6 +37,7 @@ FeaturesCollector::~FeaturesCollector()
   (void)GetFileSize(m_datFile);
 }
 
+// static
 uint32_t FeaturesCollector::GetFileSize(FileWriter const & f)
 {
   // .dat file should be less than 4Gb
@@ -90,7 +91,7 @@ void FeaturesCollector::Write(char const * src, size_t size)
   } while (size > 0);
 }
 
-uint32_t FeaturesCollector::WriteFeatureBase(vector<char> const & bytes, FeatureBuilder1 const & fb)
+uint32_t FeaturesCollector::WriteFeatureBase(std::vector<char> const & bytes, FeatureBuilder1 const & fb)
 {
   size_t const sz = bytes.size();
   CHECK(sz != 0, ("Empty feature not allowed here!"));
@@ -103,15 +104,17 @@ uint32_t FeaturesCollector::WriteFeatureBase(vector<char> const & bytes, Feature
   return m_featureID++;
 }
 
-void FeaturesCollector::operator()(FeatureBuilder1 const & fb)
+uint32_t FeaturesCollector::operator()(FeatureBuilder1 const & fb)
 {
   FeatureBuilder1::TBuffer bytes;
   fb.Serialize(bytes);
-  (void)WriteFeatureBase(bytes, fb);
+  uint32_t const featureId = WriteFeatureBase(bytes, fb);
+  CHECK_LESS(0, m_featureID, ());
+  return featureId;
 }
 
-FeaturesAndRawGeometryCollector::FeaturesAndRawGeometryCollector(string const & featuresFileName,
-                                                                 string const & rawGeometryFileName)
+FeaturesAndRawGeometryCollector::FeaturesAndRawGeometryCollector(std::string const & featuresFileName,
+                                                                 std::string const & rawGeometryFileName)
   : FeaturesCollector(featuresFileName), m_rawGeometryFileStream(rawGeometryFileName)
 {
   CHECK_EQUAL(GetFileSize(m_rawGeometryFileStream), 0, ());
@@ -124,12 +127,12 @@ FeaturesAndRawGeometryCollector::~FeaturesAndRawGeometryCollector()
   LOG(LINFO, ("Write", m_rawGeometryCounter, "geometries into", m_rawGeometryFileStream.GetName()));
 }
 
-void FeaturesAndRawGeometryCollector::operator()(FeatureBuilder1 const & fb)
+uint32_t FeaturesAndRawGeometryCollector::operator()(FeatureBuilder1 const & fb)
 {
-  FeaturesCollector::operator()(fb);
+  uint32_t const featureId = FeaturesCollector::operator()(fb);
   FeatureBuilder1::TGeometry const & geom = fb.GetGeometry();
   if (geom.empty())
-    return;
+    return featureId;
 
   ++m_rawGeometryCounter;
 
@@ -142,5 +145,6 @@ void FeaturesAndRawGeometryCollector::operator()(FeatureBuilder1 const & fb)
     m_rawGeometryFileStream.Write(points.data(),
                                   sizeof(FeatureBuilder1::TPointSeq::value_type) * points.size());
   }
+  return featureId;
 }
 }

@@ -3,23 +3,28 @@ package com.mapswithme.maps.widget.placepage;
 import android.location.Location;
 import android.os.Bundle;
 import android.support.annotation.Nullable;
-import android.support.v4.app.DialogFragment;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
 import android.widget.TextView;
 
 import com.mapswithme.maps.Framework;
 import com.mapswithme.maps.R;
+import com.mapswithme.maps.base.BaseMwmDialogFragment;
 import com.mapswithme.maps.bookmarks.data.DistanceAndAzimut;
 import com.mapswithme.maps.bookmarks.data.MapObject;
 import com.mapswithme.maps.location.LocationHelper;
+import com.mapswithme.maps.location.LocationListener;
 import com.mapswithme.maps.widget.ArrowView;
 import com.mapswithme.util.LocationUtils;
+import com.mapswithme.util.UiUtils;
 import com.mapswithme.util.statistics.AlohaHelper;
+import com.mapswithme.util.statistics.Statistics;
 
-public class DirectionFragment extends DialogFragment implements LocationHelper.LocationListener
+public class DirectionFragment extends BaseMwmDialogFragment
+                            implements LocationListener
 {
   private static final String EXTRA_MAP_OBJECT = "MapObject";
 
@@ -31,10 +36,9 @@ public class DirectionFragment extends DialogFragment implements LocationHelper.
   private MapObject mMapObject;
 
   @Override
-  public void onCreate(Bundle savedInstanceState)
+  protected int getCustomTheme()
   {
-    super.onCreate(savedInstanceState);
-    setStyle(DialogFragment.STYLE_NORMAL, R.style.MwmMain_DialogFragment_Fullscreen_SemiTransparent);
+    return R.style.MwmTheme_DialogFragment_Fullscreen_Translucent;
   }
 
   @Override
@@ -47,6 +51,7 @@ public class DirectionFragment extends DialogFragment implements LocationHelper.
       public boolean onTouch(View v, MotionEvent event)
       {
         dismiss();
+        Statistics.INSTANCE.trackEvent(Statistics.EventName.PP_DIRECTION_ARROW_CLOSE);
         AlohaHelper.logClick(AlohaHelper.PP_DIRECTION_ARROW_CLOSE);
         return false;
       }
@@ -71,6 +76,16 @@ public class DirectionFragment extends DialogFragment implements LocationHelper.
     mTvTitle = (TextView) root.findViewById(R.id.tv__title);
     mTvSubtitle = (TextView) root.findViewById(R.id.tv__subtitle);
     mTvDistance = (TextView) root.findViewById(R.id.tv__straight_distance);
+
+    UiUtils.waitLayout(mTvTitle, new ViewTreeObserver.OnGlobalLayoutListener() {
+      @Override
+      public void onGlobalLayout()
+      {
+        final int height = mTvTitle.getHeight();
+        final int lineHeight = mTvTitle.getLineHeight();
+        mTvTitle.setMaxLines(height / lineHeight);
+      }
+    });
   }
 
   public void setMapObject(MapObject object)
@@ -83,8 +98,8 @@ public class DirectionFragment extends DialogFragment implements LocationHelper.
   {
     if (mMapObject != null && isResumed())
     {
-      mTvTitle.setText(mMapObject.getName());
-      mTvSubtitle.setText(mMapObject.getPoiTypeName());
+      mTvTitle.setText(mMapObject.getTitle());
+      mTvSubtitle.setText(mMapObject.getSubtitle());
     }
   }
 
@@ -93,7 +108,7 @@ public class DirectionFragment extends DialogFragment implements LocationHelper.
   public void onResume()
   {
     super.onResume();
-    LocationHelper.INSTANCE.addLocationListener(this);
+    LocationHelper.INSTANCE.addListener(this, true);
     refreshViews();
   }
 
@@ -101,7 +116,7 @@ public class DirectionFragment extends DialogFragment implements LocationHelper.
   public void onPause()
   {
     super.onPause();
-    LocationHelper.INSTANCE.removeLocationListener(this);
+    LocationHelper.INSTANCE.removeListener(this);
   }
 
   @Override
@@ -109,8 +124,9 @@ public class DirectionFragment extends DialogFragment implements LocationHelper.
   {
     if (mMapObject != null)
     {
-      final DistanceAndAzimut distanceAndAzimuth = Framework.nativeGetDistanceAndAzimutFromLatLon(mMapObject.getLat(),
-          mMapObject.getLon(), location.getLatitude(), location.getLongitude(), 0.0);
+      final DistanceAndAzimut distanceAndAzimuth =
+          Framework.nativeGetDistanceAndAzimuthFromLatLon(mMapObject.getLat(), mMapObject.getLon(),
+                                                          location.getLatitude(), location.getLongitude(), 0.0);
       mTvDistance.setText(distanceAndAzimuth.getDistance());
     }
   }
@@ -118,7 +134,7 @@ public class DirectionFragment extends DialogFragment implements LocationHelper.
   @Override
   public void onCompassUpdated(long time, double magneticNorth, double trueNorth, double accuracy)
   {
-    final Location last = LocationHelper.INSTANCE.getLastLocation();
+    final Location last = LocationHelper.INSTANCE.getSavedLocation();
     if (last == null || mMapObject == null)
       return;
 
@@ -127,7 +143,7 @@ public class DirectionFragment extends DialogFragment implements LocationHelper.
     trueNorth = LocationUtils.correctCompassAngle(rotation, trueNorth);
     final double north = (trueNorth >= 0.0) ? trueNorth : magneticNorth;
 
-    final DistanceAndAzimut da = Framework.nativeGetDistanceAndAzimutFromLatLon(
+    final DistanceAndAzimut da = Framework.nativeGetDistanceAndAzimuthFromLatLon(
         mMapObject.getLat(), mMapObject.getLon(),
         last.getLatitude(), last.getLongitude(), north);
 

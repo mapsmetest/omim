@@ -17,7 +17,7 @@ namespace platform
 {
 namespace tests_support
 {
-ScopedMwm::ScopedMwm(string const & relativePath) : m_file(relativePath, "")
+ScopedMwm::ScopedMwm(string const & relativePath) : m_file(relativePath, ScopedFile::Mode::Create)
 {
   DataHeader header;
   {
@@ -26,7 +26,7 @@ ScopedMwm::ScopedMwm(string const & relativePath) : m_file(relativePath, "")
     // Each writer must be in it's own scope to avoid conflicts on the final write.
     {
       FileWriter versionWriter = container.GetWriter(VERSION_FILE_TAG);
-      version::WriteVersion(versionWriter, my::TodayAsYYMMDD());
+      version::WriteVersion(versionWriter, my::SecondsSinceEpoch());
     }
 
     FileWriter w = container.GetWriter(HEADER_FILE_TAG);

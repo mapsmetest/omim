@@ -1,16 +1,17 @@
 #pragma once
+
 #include "indexer/drawing_rule_def.hpp"
-#include "indexer/types_mapping.hpp"
-#include "indexer/scales.hpp"
 #include "indexer/feature_decl.hpp"
+#include "indexer/map_style.hpp"
+#include "indexer/scales.hpp"
+#include "indexer/types_mapping.hpp"
 
-#include "std/vector.hpp"
-#include "std/string.hpp"
-#include "std/iostream.hpp"
 #include "std/bitset.hpp"
-#include "std/noncopyable.hpp"
 #include "std/initializer_list.hpp"
-
+#include "std/iostream.hpp"
+#include "std/noncopyable.hpp"
+#include "std/string.hpp"
+#include "std/vector.hpp"
 
 class ClassifObject;
 
@@ -84,7 +85,7 @@ public:
 
   bool IsDrawable(int scale) const;
   bool IsDrawableAny() const;
-  bool IsDrawableLike(feature::EGeomType ft) const;
+  bool IsDrawableLike(feature::EGeomType ft, bool emptyName = false) const;
 
   pair<int, int> GetDrawScaleRange() const;
 
@@ -110,10 +111,8 @@ public:
     }
   }
 
-  typedef bitset<scales::UPPER_STYLE_SCALE+1> visible_mask_t;
-  visible_mask_t GetVisibilityMask() const { return m_visibility; }
-  void SetVisibilityMask(visible_mask_t mask) { m_visibility = mask; }
-  void SetVisibilityOnScale(const bool isVisible, const int scale) { m_visibility[scale] = isVisible; }
+  typedef bitset<scales::UPPER_STYLE_SCALE+1> TVisibleMask;
+  void SetVisibilityOnScale(bool isVisible, int scale) { m_visibility[scale] = isVisible; }
 
   /// @name Policies for classificator tree serialization.
   //@{
@@ -146,10 +145,7 @@ private:
   string m_name;
   vector<drule::Key> m_drawRule;
   vector<ClassifObject> m_objs;
-  visible_mask_t m_visibility;
-
-  typedef vector<ClassifObject>::iterator iter_t;
-  typedef vector<ClassifObject>::const_iterator const_iter_t;
+  TVisibleMask m_visibility;
 };
 
 inline void swap(ClassifObject & r1, ClassifObject & r2)
@@ -182,6 +178,8 @@ public:
 
   void Clear();
 
+  bool HasTypesMapping() const { return m_mapping.IsLoaded(); }
+
   /// Return type by path in classificator tree, for example
   /// path = ["natural", "caostline"].
   //@{
@@ -193,9 +191,13 @@ public:
   /// Invokes ASSERT in case of nonexisting type
   uint32_t GetTypeByPath(vector<string> const & path) const;
   uint32_t GetTypeByPath(initializer_list<char const *> const & lst) const;
+  /// @see GetReadableObjectName().
+  /// @returns 0 in case of nonexisting type.
+  uint32_t GetTypeByReadableObjectName(string const & name) const;
   //@}
 
   uint32_t GetIndexForType(uint32_t t) const { return m_mapping.GetIndex(t); }
+  // Throws std::out_of_range exception.
   uint32_t GetTypeForIndex(uint32_t i) const { return m_mapping.GetType(i); }
   bool IsTypeValid(uint32_t t) const { return m_mapping.HasIndex(t); }
 

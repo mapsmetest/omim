@@ -1,9 +1,16 @@
 #!/bin/bash
+set -u -e
+
 OPT_DEBUG=
 OPT_RELEASE=
-OPT_OSRM=
 OPT_CLEAN=
-while getopts ":cdro" opt; do
+OPT_SKIP_DESKTOP=
+OPT_DESIGNER=
+OPT_GCC=
+OPT_TARGET=
+OPT_PATH=
+
+while getopts ":cdrsgtp:" opt; do
   case $opt in
     d)
       OPT_DEBUG=1
@@ -11,102 +18,121 @@ while getopts ":cdro" opt; do
     r)
       OPT_RELEASE=1
       ;;
-    o)
-      OPT_OSRM=1
-      ;;
     c)
       OPT_CLEAN=1
       ;;
+    s)
+      OPT_SKIP_DESKTOP=1
+      CMAKE_CONFIG="${CMAKE_CONFIG:-} -DSKIP_DESKTOP=ON"
+      ;;
+    t)
+      OPT_DESIGNER=1
+      ;;
+    g)
+      OPT_GCC=1
+      ;;
+    p)
+      OPT_PATH="$OPTARG"
+      ;;
     *)
-      echo "This tool builds omim and osrm-backend."
-      echo "Usage: $0 [-d] [-r] [-o] [-c]"
+      echo "This tool builds omim"
+      echo "Usage: $0 [-d] [-r] [-c] [-s] [-t] [-g] [-p PATH] [target1 target2 ...]"
       echo
       echo -e "-d\tBuild omim-debug"
       echo -e "-r\tBuild omim-release"
-      echo -e "-o\tBuild osrm-backend"
       echo -e "-c\tClean before building"
-      echo
-      echo "By default everything is built. Specify TARGET for omim-* if needed."
+      echo -e "-s\tSkip desktop app building"
+      echo -e "-t\tBuild designer tool (only for MacOS X platform)"
+      echo -e "-g\tForce use GCC (only for MacOS X platform)"
+      echo -e "-p\tDirectory for built binaries"
+      echo "By default both configurations is built."
       exit 1
       ;;
   esac
 done
 
+[ -n "$OPT_DESIGNER" -a -n "$OPT_SKIP_DESKTOP" ] &&
+echo "Can't skip desktop and build designer tool simultaneously" &&
+exit 2
+
+OPT_TARGET=${@:$OPTIND}
+
 # By default build everything
-if [ -z "$OPT_DEBUG$OPT_RELEASE$OPT_OSRM" ]; then
+if [ -z "$OPT_DEBUG$OPT_RELEASE" ]; then
   OPT_DEBUG=1
   OPT_RELEASE=1
-  OPT_OSRM=1
 fi
 
-set -x -u -e
+OMIM_PATH="$(cd "${OMIM_PATH:-$(dirname "$0")/../..}"; pwd)"
+if ! grep "DEFAULT_URLS_JSON" "$OMIM_PATH/private.h" >/dev/null 2>/dev/null; then
+  echo "Please run $OMIM_PATH/configure.sh"
+  exit 2
+fi
 
-BOOST_PATH="${BOOST_PATH:-/usr/local/boost_1.54.0}"
-DEVTOOLSET_PATH=/opt/rh/devtoolset-2
+DEVTOOLSET_PATH=/opt/rh/devtoolset-6
 if [ -d "$DEVTOOLSET_PATH" ]; then
-  . "$DEVTOOLSET_PATH/enable"
+  export MANPATH=
+  source "$DEVTOOLSET_PATH/enable"
 else
   DEVTOOLSET_PATH=
 fi
-OMIM_PATH="$(cd "${OMIM_PATH:-$(dirname "$0")/../..}"; pwd)"
-export MANPATH=""
-if [ ! -x "${QMAKE-}" ]; then
-  QMAKE=qmake-qt5
-  if ! hash "$QMAKE" 2>/dev/null; then
-    QMAKE=qmake
-  fi
-fi
-if [ ! -x "${CMAKE-}" ]; then
-  CMAKE=cmake28
-  if ! hash "$CMAKE" 2>/dev/null; then
-    CMAKE=cmake
-  fi
-fi
+
+# Find cmake
+source "$OMIM_PATH/tools/autobuild/detect_cmake.sh"
+
+# OS-specific parameters
 if [ "$(uname -s)" == "Darwin" ]; then
-  SPEC=macx-clang
-  PROCESSES=4
+  PROCESSES=$(sysctl -n hw.ncpu)
+
+  if [ -n "$OPT_GCC" ]; then
+    GCC="$(ls /usr/local/bin | grep '^gcc-[6-9][0-9]\?' -m 1)" || true
+    GPP="$(ls /usr/local/bin | grep '^g++-[6-9][0-9]\?' -m 1)" || true
+    [ -z "$GCC" -o -z "$GPP" ] \
+    && echo "Either gcc or g++ is not found. Note, minimal supported gcc version is 6." \
+    && exit 2
+    CMAKE_CONFIG="${CMAKE_CONFIG:-} -DCMAKE_C_COMPILER=/usr/local/bin/$GCC \
+                                    -DCMAKE_CXX_COMPILER=/usr/local/bin/$GPP"
+  fi
 else
-  SPEC=linux-clang
-  PROCESSES=$(($(nproc) / 2))
+  [ -n "$OPT_DESIGNER" ] \
+  && echo "Designer tool supported only on MacOS X platform" && exit 2
+  PROCESSES=$(nproc)
 fi
 
-build_conf()
+build()
 {
   CONF=$1
-  DIRNAME="${TARGET:-$OMIM_PATH/..}/omim-build-$CONF"
+  if [ -n "$OPT_PATH" ]; then
+    DIRNAME="$OPT_PATH/omim-build-$(echo "$CONF" | tr '[:upper:]' '[:lower:]')"
+  else
+    DIRNAME="$OMIM_PATH/../omim-build-$(echo "$CONF" | tr '[:upper:]' '[:lower:]')"
+  fi
   [ -d "$DIRNAME" -a -n "$OPT_CLEAN" ] && rm -r "$DIRNAME"
-
   if [ ! -d "$DIRNAME" ]; then
-    mkdir "$DIRNAME"
+    mkdir -p "$DIRNAME"
     ln -s "$OMIM_PATH/data" "$DIRNAME/data"
   fi
-
-  (
-    export BOOST_INCLUDEDIR="$BOOST_PATH/include"
-    cd "$DIRNAME"
-    if [ -n "$DEVTOOLSET_PATH" ]; then
-      "$QMAKE" "$OMIM_PATH/omim.pro" -spec $SPEC CONFIG+=$CONF ${CONFIG+"CONFIG*=$CONFIG"} \
-        "QMAKE_CXXFLAGS *=--gcc-toolchain=$DEVTOOLSET_PATH/root/usr" \
-        "QMAKE_LFLAGS *=--gcc-toolchain=$DEVTOOLSET_PATH/root/usr"
-    else
-      "$QMAKE" "$OMIM_PATH/omim.pro" -spec $SPEC CONFIG+=$CONF ${CONFIG+"CONFIG*=$CONFIG"}
+  cd "$DIRNAME"
+  TMP_FILE="build_error.log"
+  if [ -z "$OPT_DESIGNER" ]; then
+    "$CMAKE" "$OMIM_PATH" -DCMAKE_BUILD_TYPE="$CONF" ${CMAKE_CONFIG:-}
+    echo ""
+    if ! make $OPT_TARGET -j $PROCESSES 2> "$TMP_FILE"; then
+      echo '--------------------'
+      cat "$TMP_FILE"
+      exit 1
     fi
-    make -j $PROCESSES
-  )
+  else
+    "$CMAKE" "$OMIM_PATH" -DCMAKE_BUILD_TYPE="$CONF" \
+    -DBUILD_DESIGNER:bool=True ${CMAKE_CONFIG:-}
+    if ! make package -j $PROCESSES 2> "$TMP_FILE"; then
+      echo '--------------------'
+      cat "$TMP_FILE"
+      exit 1
+    fi
+  fi
 }
 
-[ -n "$OPT_DEBUG" ]   && build_conf debug
-[ -n "$OPT_RELEASE" ] && build_conf release
-
-if [ -n "$OPT_OSRM" ]; then
-  BACKEND="$OMIM_PATH/3party/osrm/osrm-backend"
-  OSRM_TARGET="${OSRM_TARGET:-$BACKEND/build}"
-  [ -d "$OSRM_TARGET" -a -n "$OPT_CLEAN" ] && rm -r "$OSRM_TARGET"
-  mkdir -p "$OSRM_TARGET"
-  (
-    cd "$OSRM_TARGET"
-    "$CMAKE" "-DBOOST_ROOT=$BOOST_PATH" "$BACKEND"
-    make clean
-    make
-  )
-fi
+[ -n "$OPT_DEBUG" ]   && build Debug
+[ -n "$OPT_RELEASE" ] && build Release
+exit 0

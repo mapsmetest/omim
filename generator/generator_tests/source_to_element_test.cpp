@@ -1,18 +1,27 @@
 #include "testing/testing.hpp"
 
-#include "coding/parse_xml.hpp"
-#include "generator/osm_source.hpp"
+#include "generator/generator_tests/source_data.hpp"
 #include "generator/osm_element.hpp"
+#include "generator/osm_source.hpp"
 
-#include "source_data.hpp"
+#include "coding/parse_xml.hpp"
+
+#include <cstddef>
+#include <iostream>
+#include <iterator>
+#include <sstream>
+#include <string>
+#include <vector>
+
+using namespace generator;
 
 UNIT_TEST(Source_To_Element_create_from_xml_test)
 {
-  istringstream ss(way_xml_data);
+  std::istringstream ss(way_xml_data);
   SourceReader reader(ss);
 
-  vector<OsmElement> elements;
-  BuildFeaturesFromXML(reader, [&elements](OsmElement * e)
+  std::vector<OsmElement> elements;
+  ProcessOsmElementsFromXML(reader, [&elements](OsmElement * e)
   {
     elements.push_back(*e);
   });
@@ -22,37 +31,37 @@ UNIT_TEST(Source_To_Element_create_from_xml_test)
 
 UNIT_TEST(Source_To_Element_create_from_o5m_test)
 {
-  string src(begin(relation_o5m_data), end(relation_o5m_data));
-  istringstream ss(src);
+  std::string src(std::begin(relation_o5m_data), std::end(relation_o5m_data));
+  std::istringstream ss(src);
   SourceReader reader(ss);
 
-  vector<OsmElement> elements;
-  BuildFeaturesFromO5M(reader, [&elements](OsmElement * e)
+  std::vector<OsmElement> elements;
+  ProcessOsmElementsFromO5M(reader, [&elements](OsmElement * e)
   {
     elements.push_back(*e);
   });
   TEST_EQUAL(elements.size(), 11, (elements));
 
-  cout << DebugPrint(elements);
+  std::cout << DebugPrint(elements);
 }
 
 UNIT_TEST(Source_To_Element_check_equivalence)
 {
-  istringstream ss1(relation_xml_data);
+  std::istringstream ss1(relation_xml_data);
   SourceReader readerXML(ss1);
 
-  vector<OsmElement> elementsXML;
-  BuildFeaturesFromXML(readerXML, [&elementsXML](OsmElement * e)
+  std::vector<OsmElement> elementsXML;
+  ProcessOsmElementsFromXML(readerXML, [&elementsXML](OsmElement * e)
   {
     elementsXML.push_back(*e);
   });
 
-  string src(begin(relation_o5m_data), end(relation_o5m_data));
-  istringstream ss2(src);
+  std::string src(std::begin(relation_o5m_data), std::end(relation_o5m_data));
+  std::istringstream ss2(src);
   SourceReader readerO5M(ss2);
 
-  vector<OsmElement> elementsO5M;
-  BuildFeaturesFromO5M(readerO5M, [&elementsO5M](OsmElement * e)
+  std::vector<OsmElement> elementsO5M;
+  ProcessOsmElementsFromO5M(readerO5M, [&elementsO5M](OsmElement * e)
   {
     elementsO5M.push_back(*e);
   });

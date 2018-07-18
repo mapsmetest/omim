@@ -12,11 +12,6 @@ public final class SearchRecents
 {
   private static final List<String> sRecents = new ArrayList<>();
 
-  static
-  {
-    refresh();
-  }
-
   private SearchRecents() {}
 
   public static void refresh()
@@ -41,7 +36,6 @@ public final class SearchRecents
 
   public static boolean add(@NonNull String query)
   {
-    query = query.trim();
     if (TextUtils.isEmpty(query) || sRecents.contains(query))
       return false;
 

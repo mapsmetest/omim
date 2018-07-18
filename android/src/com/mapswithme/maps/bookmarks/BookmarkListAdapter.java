@@ -1,136 +1,139 @@
 package com.mapswithme.maps.bookmarks;
 
-import android.app.Activity;
-import android.graphics.drawable.Drawable;
 import android.location.Location;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
+import android.support.v7.widget.RecyclerView;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.BaseAdapter;
-import android.widget.ImageView;
 import android.widget.TextView;
+
 import com.mapswithme.maps.R;
-import com.mapswithme.maps.bookmarks.data.Bookmark;
 import com.mapswithme.maps.bookmarks.data.BookmarkCategory;
-import com.mapswithme.maps.bookmarks.data.DistanceAndAzimut;
-import com.mapswithme.maps.bookmarks.data.Track;
+import com.mapswithme.maps.bookmarks.data.BookmarkManager;
 import com.mapswithme.maps.location.LocationHelper;
-import com.mapswithme.util.Graphics;
+import com.mapswithme.maps.location.LocationListener;
+import com.mapswithme.maps.widget.recycler.RecyclerClickListener;
+import com.mapswithme.maps.widget.recycler.RecyclerLongClickListener;
 
-import java.util.ArrayList;
-import java.util.List;
+import static com.mapswithme.maps.bookmarks.Holders.BaseBookmarkHolder.SECTION_BMKS;
+import static com.mapswithme.maps.bookmarks.Holders.BaseBookmarkHolder.SECTION_DESC;
+import static com.mapswithme.maps.bookmarks.Holders.BaseBookmarkHolder.SECTION_TRACKS;
+import static com.mapswithme.maps.bookmarks.Holders.BaseBookmarkHolder.getBookmarksSectionPosition;
+import static com.mapswithme.maps.bookmarks.Holders.BaseBookmarkHolder.getDescItemCount;
+import static com.mapswithme.maps.bookmarks.Holders.BaseBookmarkHolder.getDescSectionPosition;
+import static com.mapswithme.maps.bookmarks.Holders.BaseBookmarkHolder.getTracksSectionPosition;
+import static com.mapswithme.maps.bookmarks.Holders.BaseBookmarkHolder.isSectionEmpty;
+import static com.mapswithme.maps.bookmarks.Holders.BookmarkViewHolder.calculateBookmarkPosition;
 
-
-public class BookmarkListAdapter extends BaseAdapter
-    implements LocationHelper.LocationListener
+public class BookmarkListAdapter extends RecyclerView.Adapter<Holders.BaseBookmarkHolder>
 {
-  private final Activity mActivity;
+  @NonNull
   private final BookmarkCategory mCategory;
 
   // view types
   static final int TYPE_TRACK = 0;
   static final int TYPE_BOOKMARK = 1;
   static final int TYPE_SECTION = 2;
+  static final int TYPE_DESC = 3;
 
-  private static final int SECTION_TRACKS = 0;
-  private static final int SECTION_BMKS = 1;
-
-  public BookmarkListAdapter(Activity activity, BookmarkCategory cat)
+  private final LocationListener mLocationListener = new LocationListener.Simple()
   {
-    mActivity = activity;
-    mCategory = cat;
+    @Override
+    public void onLocationUpdated(Location location)
+    {
+      notifyDataSetChanged();
+    }
+  };
+
+  @Nullable
+  private RecyclerLongClickListener mLongClickListener;
+  @Nullable
+  private RecyclerClickListener mClickListener;
+
+  BookmarkListAdapter(@NonNull BookmarkCategory category)
+  {
+    mCategory = category;
+  }
+
+  public void setOnClickListener(@Nullable RecyclerClickListener listener)
+  {
+    mClickListener = listener;
+  }
+
+  void setOnLongClickListener(@Nullable RecyclerLongClickListener listener)
+  {
+    mLongClickListener = listener;
   }
 
   public void startLocationUpdate()
   {
-    LocationHelper.INSTANCE.addLocationListener(this);
+    LocationHelper.INSTANCE.addListener(mLocationListener, true);
   }
 
   public void stopLocationUpdate()
   {
-    LocationHelper.INSTANCE.removeLocationListener(this);
+    LocationHelper.INSTANCE.removeListener(mLocationListener);
   }
 
   @Override
-  public int getViewTypeCount()
+  public Holders.BaseBookmarkHolder onCreateViewHolder(ViewGroup parent, int viewType)
   {
-    return 3; // bookmark + track + section
+    LayoutInflater inflater = LayoutInflater.from(parent.getContext());
+    Holders.BaseBookmarkHolder holder = null;
+    switch (viewType)
+    {
+      case TYPE_TRACK:
+        holder = new Holders.TrackViewHolder(inflater.inflate(R.layout.item_track, parent,
+                                                              false), mCategory);
+        break;
+      case TYPE_BOOKMARK:
+        holder = new Holders.BookmarkViewHolder(inflater.inflate(R.layout.item_bookmark, parent,
+                                                                 false), mCategory);
+        break;
+      case TYPE_SECTION:
+        TextView tv = (TextView) inflater.inflate(R.layout.item_category_title, parent, false);
+        holder = new Holders.SectionViewHolder(tv, mCategory);
+        break;
+      case TYPE_DESC:
+        View desc = inflater.inflate(R.layout.item_category_description, parent, false);
+        holder = new Holders.DescriptionViewHolder(desc, mCategory);
+        break;
+    }
+
+    if (holder == null)
+      throw new AssertionError("Unsupported view type: " + viewType);
+
+    holder.setOnClickListener(mClickListener);
+    holder.setOnLongClickListener(mLongClickListener);
+    return holder;
+  }
+
+  @Override
+  public void onBindViewHolder(Holders.BaseBookmarkHolder holder, int position)
+  {
+    holder.bind(position);
   }
 
   @Override
   public int getItemViewType(int position)
   {
-    final int bmkPos = getBookmarksSectionPosition();
-    final int trackPos = getTracksSectionPosition();
+    final int descPos = getDescSectionPosition(mCategory);
+    final int bmkPos = getBookmarksSectionPosition(mCategory);
+    final int trackPos = getTracksSectionPosition(mCategory);
 
-    if (position == bmkPos || position == trackPos)
+    if (position == bmkPos || position == trackPos || position == descPos)
       return TYPE_SECTION;
 
-    if (position > bmkPos && !isSectionEmpty(SECTION_BMKS))
+    if (position > bmkPos && !isSectionEmpty(mCategory, SECTION_BMKS))
       return TYPE_BOOKMARK;
-    else if (position > trackPos && !isSectionEmpty(SECTION_TRACKS))
+    else if (position > trackPos && !isSectionEmpty(mCategory, SECTION_TRACKS))
       return TYPE_TRACK;
+    else if (position > descPos && !isSectionEmpty(mCategory, SECTION_DESC))
+      return TYPE_DESC;
 
     throw new IllegalArgumentException("Position not found: " + position);
-  }
-
-  @Override
-  public boolean isEnabled(int position)
-  {
-    return getItemViewType(position) != TYPE_SECTION;
-  }
-
-  @Override
-  public View getView(int position, View convertView, ViewGroup parent)
-  {
-    final int type = getItemViewType(position);
-
-    if (type == TYPE_SECTION)
-    {
-      TextView sectionView;
-
-      if (convertView == null)
-        sectionView = (TextView) LayoutInflater.from(mActivity).inflate(R.layout.item_category_title, parent, false);
-      else
-        sectionView = (TextView) convertView;
-
-      final int sectionIndex = getSectionForPosition(position);
-      sectionView.setText(getSections().get(sectionIndex));
-      return sectionView;
-    }
-
-    if (convertView == null)
-    {
-      final int id = (type == TYPE_BOOKMARK) ? R.layout.item_bookmark : R.layout.item_track;
-      convertView = LayoutInflater.from(mActivity).inflate(id, parent, false);
-      convertView.setTag(new PinHolder(convertView));
-    }
-
-    final PinHolder holder = (PinHolder) convertView.getTag();
-    if (type == TYPE_BOOKMARK)
-      holder.set((Bookmark) getItem(position));
-    else
-      holder.set((Track) getItem(position));
-
-    return convertView;
-  }
-
-  @Override
-  public int getCount()
-  {
-    return mCategory.getSize()
-        + (isSectionEmpty(SECTION_TRACKS) ? 0 : 1)
-        + (isSectionEmpty(SECTION_BMKS) ? 0 : 1);
-  }
-
-  @Override
-  public Object getItem(int position)
-  {
-    if (getItemViewType(position) == TYPE_TRACK)
-      return mCategory.getTrack(position - 1);
-    else
-      return mCategory.getBookmark(position - 1
-          - (isSectionEmpty(SECTION_TRACKS) ? 0 : mCategory.getTracksCount() + 1));
   }
 
   @Override
@@ -140,130 +143,30 @@ public class BookmarkListAdapter extends BaseAdapter
   }
 
   @Override
-  public void onLocationUpdated(final Location l)
+  public int getItemCount()
   {
-    notifyDataSetChanged();
+    return mCategory.size()
+           + (isSectionEmpty(mCategory, SECTION_TRACKS) ? 0 : 1)
+           + (isSectionEmpty(mCategory, SECTION_BMKS) ? 0 : 1)
+           + getDescItemCount(mCategory);
   }
 
-  @Override
-  public void onCompassUpdated(long time, double magneticNorth, double trueNorth, double accuracy)
+  // FIXME: remove this heavy method and use BoomarkInfo class instead.
+  public Object getItem(int position)
   {
-    // We don't show any arrows for bookmarks any more.
-  }
+    if (getItemViewType(position) == TYPE_DESC)
+      throw new UnsupportedOperationException("Not supported here! Position = " + position);
 
-  @Override
-  public void onLocationError(int errorCode)
-  {
-  }
-
-  private class PinHolder
-  {
-    ImageView icon;
-    TextView name;
-    TextView distance;
-
-    public PinHolder(View convertView)
+    if (getItemViewType(position) == TYPE_TRACK)
     {
-      icon = (ImageView) convertView.findViewById(R.id.iv__bookmark_color);
-      name = (TextView) convertView.findViewById(R.id.tv__bookmark_name);
-      distance = (TextView) convertView.findViewById(R.id.tv__bookmark_distance);
+      final long trackId = BookmarkManager.INSTANCE.getTrackIdByPosition(mCategory.getId(), position - 1);
+      return BookmarkManager.INSTANCE.getTrack(trackId);
     }
-
-    void setName(Bookmark bmk)
+    else
     {
-      name.setText(bmk.getName());
+      final int pos = calculateBookmarkPosition(mCategory, position);
+      final long bookmarkId = BookmarkManager.INSTANCE.getBookmarkIdByPosition(mCategory.getId(), pos);
+      return BookmarkManager.INSTANCE.getBookmark(bookmarkId);
     }
-
-    void setName(Track trk)
-    {
-      name.setText(trk.getName());
-    }
-
-    void setDistance(Bookmark bmk)
-    {
-      final Location loc = LocationHelper.INSTANCE.getLastLocation();
-      if (loc != null)
-      {
-        final DistanceAndAzimut daa = bmk.getDistanceAndAzimuth(loc.getLatitude(), loc.getLongitude(), 0.0);
-        distance.setText(daa.getDistance());
-      }
-      else
-        distance.setText(null);
-    }
-
-    void setDistance(Track trk)
-    {
-      distance.setText(mActivity.getString(R.string.length) + " " + trk.getLengthString());
-    }
-
-    void setIcon(Bookmark bookmark)
-    {
-      icon.setImageResource(bookmark.getIcon().getSelectedResId());
-    }
-
-    void setIcon(Track trk)
-    {
-      final Drawable circle = Graphics.drawCircle(trk.getColor(), R.dimen.track_circle_size, mActivity.getResources());
-      icon.setImageDrawable(circle);
-    }
-
-    void set(Bookmark bmk)
-    {
-      setName(bmk);
-      setDistance(bmk);
-      setIcon(bmk);
-    }
-
-    void set(Track track)
-    {
-      setName(track);
-      setDistance(track);
-      setIcon(track);
-    }
-  }
-
-  private int getTracksSectionPosition()
-  {
-    if (isSectionEmpty(SECTION_TRACKS))
-      return -1;
-
-    return 0;
-  }
-
-  private int getBookmarksSectionPosition()
-  {
-    if (isSectionEmpty(SECTION_BMKS))
-      return -1;
-
-    return mCategory.getTracksCount()
-        + (isSectionEmpty(SECTION_TRACKS) ? 0 : 1);
-  }
-
-  private List<String> getSections()
-  {
-    final List<String> sections = new ArrayList<>();
-    sections.add(mActivity.getString(R.string.tracks));
-    sections.add(mActivity.getString(R.string.bookmarks));
-    return sections;
-  }
-
-  private int getSectionForPosition(int position)
-  {
-    if (position == getTracksSectionPosition())
-      return SECTION_TRACKS;
-    if (position == getBookmarksSectionPosition())
-      return SECTION_BMKS;
-
-    throw new IllegalArgumentException("There is no section in position " + position);
-  }
-
-  private boolean isSectionEmpty(int section)
-  {
-    if (section == SECTION_TRACKS)
-      return mCategory.getTracksCount() == 0;
-    if (section == SECTION_BMKS)
-      return mCategory.getBookmarksCount() == 0;
-
-    throw new IllegalArgumentException("There is no section with index " + section);
   }
 }

@@ -83,8 +83,8 @@ void ChunksDownloadStrategy::SaveChunks(int64_t fileSize, string const & fName)
   (void)FileWriter::DeleteFileX(fName);
 }
 
-int64_t ChunksDownloadStrategy::LoadOrInitChunks( string const & fName,
-                                                  int64_t fileSize, int64_t chunkSize)
+int64_t ChunksDownloadStrategy::LoadOrInitChunks(string const & fName, int64_t fileSize,
+                                                 int64_t chunkSize)
 {
   ASSERT ( fileSize > 0, () );
   ASSERT ( chunkSize > 0, () );
@@ -94,8 +94,8 @@ int64_t ChunksDownloadStrategy::LoadOrInitChunks( string const & fName,
     FileReader r(fName);
     ReaderSource<FileReader> src(r);
 
-    int64_t const readedSize = ReadVarInt<int64_t>(src);
-    if (readedSize == fileSize)
+    int64_t const readSize = ReadVarInt<int64_t>(src);
+    if (readSize == fileSize)
     {
       // Load chunks.
       uint64_t const size = src.Size();
@@ -119,9 +119,8 @@ int64_t ChunksDownloadStrategy::LoadOrInitChunks( string const & fName,
       return downloadedSize;
     }
   }
-  catch (RootException const & e)
+  catch (FileReader::Exception const & e)
   {
-    // Usually - file not exists or Reader::Exception.
     LOG(LDEBUG, (e.Msg()));
   }
 
@@ -129,10 +128,10 @@ int64_t ChunksDownloadStrategy::LoadOrInitChunks( string const & fName,
   return 0;
 }
 
-void ChunksDownloadStrategy::ChunkFinished(bool success, RangeT const & range)
+string ChunksDownloadStrategy::ChunkFinished(bool success, RangeT const & range)
 {
   pair<ChunkT *, int> res = GetChunk(range);
-
+  string url;
   // find server which was downloading this chunk
   if (res.first)
   {
@@ -140,6 +139,7 @@ void ChunksDownloadStrategy::ChunkFinished(bool success, RangeT const & range)
     {
       if (m_servers[s].m_chunkIndex == res.second)
       {
+        url = m_servers[s].m_url;
         if (success)
         {
           // mark server as free and chunk as ready
@@ -150,7 +150,6 @@ void ChunksDownloadStrategy::ChunkFinished(bool success, RangeT const & range)
         {
           LOG(LINFO, ("Thread for url", m_servers[s].m_url,
                       "failed to download chunk number", m_servers[s].m_chunkIndex));
-
           // remove failed server and mark chunk as free
           m_servers.erase(m_servers.begin() + s);
           res.first->m_status = CHUNK_FREE;
@@ -159,6 +158,7 @@ void ChunksDownloadStrategy::ChunkFinished(bool success, RangeT const & range)
       }
     }
   }
+  return url;
 }
 
 ChunksDownloadStrategy::ResultT

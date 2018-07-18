@@ -6,6 +6,8 @@
 
 #include "platform/platform.hpp"
 
+#include "std/sstream.hpp"
+
 namespace
 {
   tm * GetLocalTime()
@@ -31,6 +33,7 @@ void LogMessageFile(my::LogLevel level, my::SrcPoint const & srcPoint, string co
   case LWARNING: recordType.assign("WARN "); break;
   case LERROR: recordType.assign("ERROR "); break;
   case LCRITICAL: recordType.assign("FATAL "); break;
+  case NUM_LOG_LEVELS: CHECK(false, ()); break;
   }
 
   lock_guard<mutex> lock(mtx);

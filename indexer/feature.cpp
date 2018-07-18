@@ -1,49 +1,95 @@
-#include "indexer/feature.hpp"
-#include "indexer/feature_visibility.hpp"
-#include "indexer/feature_loader_base.hpp"
 #include "indexer/classificator.hpp"
+#include "indexer/feature.hpp"
+
+#include "indexer/editable_map_object.hpp"
+#include "indexer/feature_algo.hpp"
+#include "indexer/feature_impl.hpp"
+#include "indexer/feature_loader_base.hpp"
+#include "indexer/feature_utils.hpp"
+#include "indexer/feature_visibility.hpp"
+
+#include "platform/preferred_languages.hpp"
 
 #include "geometry/distance.hpp"
 #include "geometry/robust_orientation.hpp"
 
-#include "platform/preferred_languages.hpp"
+#include "base/range_iterator.hpp"
+#include "base/stl_helpers.hpp"
 
-#include "../defines.hpp" // just for file extensions
-
+#include <algorithm>
 
 using namespace feature;
+using namespace std;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // FeatureBase implementation
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-void FeatureBase::Deserialize(feature::LoaderBase * pLoader, BufferT buffer)
+void FeatureBase::Deserialize(feature::LoaderBase * pLoader, TBuffer buffer)
 {
   m_pLoader = pLoader;
   m_pLoader->Init(buffer);
 
   m_limitRect = m2::RectD::GetEmptyRect();
-  m_bTypesParsed = m_bCommonParsed = false;
+  m_typesParsed = m_commonParsed = false;
   m_header = m_pLoader->GetHeader();
+}
+
+void FeatureType::ReplaceBy(osm::EditableMapObject const & emo)
+{
+  uint8_t geoType;
+  if (emo.IsPointType())
+  {
+    // We are here for existing point features and for newly created point features.
+    m_center = emo.GetMercator();
+    m_limitRect.MakeEmpty();
+    m_limitRect.Add(m_center);
+    m_pointsParsed = m_trianglesParsed = true;
+    geoType = feature::GEOM_POINT;
+  }
+  else
+  {
+    geoType = Header() & HEADER_GEOTYPE_MASK;
+  }
+
+  m_params.name = emo.GetName();
+  string const & house = emo.GetHouseNumber();
+  if (house.empty())
+    m_params.house.Clear();
+  else
+    m_params.house.Set(house);
+  m_commonParsed = true;
+
+  m_metadata = emo.GetMetadata();
+  m_metadataParsed = true;
+
+  uint32_t typesCount = 0;
+  for (uint32_t const type : emo.GetTypes())
+    m_types[typesCount++] = type;
+  m_typesParsed = true;
+  m_header = CalculateHeader(typesCount, geoType, m_params);
+  m_header2Parsed = true;
+
+  m_id = emo.GetID();
 }
 
 void FeatureBase::ParseTypes() const
 {
-  if (!m_bTypesParsed)
+  if (!m_typesParsed)
   {
     m_pLoader->ParseTypes();
-    m_bTypesParsed = true;
+    m_typesParsed = true;
   }
 }
 
 void FeatureBase::ParseCommon() const
 {
-  if (!m_bCommonParsed)
+  if (!m_commonParsed)
   {
     ParseTypes();
 
     m_pLoader->ParseCommon();
-    m_bCommonParsed = true;
+    m_commonParsed = true;
   }
 }
 
@@ -57,9 +103,21 @@ feature::EGeomType FeatureBase::GetFeatureType() const
   }
 }
 
+void FeatureBase::SetTypes(uint32_t const (&types)[feature::kMaxTypesCount], uint32_t count)
+{
+  ASSERT_GREATER_OR_EQUAL(count, 1, ("Must be one type at least."));
+  ASSERT_LESS(count, feature::kMaxTypesCount, ("Too many types for feature"));
+  if (count >= feature::kMaxTypesCount)
+    count = feature::kMaxTypesCount - 1;
+  fill(begin(m_types), end(m_types), 0);
+  copy_n(begin(types), count, begin(m_types));
+  auto value = static_cast<uint8_t>((count - 1) & feature::HEADER_TYPE_MASK);
+  m_header = (m_header & (~feature::HEADER_TYPE_MASK)) | value;
+}
+
 string FeatureBase::DebugString() const
 {
-  ASSERT(m_bCommonParsed, ());
+  ParseCommon();
 
   Classificator const & c = classif();
 
@@ -76,25 +134,34 @@ string FeatureBase::DebugString() const
 // FeatureType implementation
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-void FeatureType::Deserialize(feature::LoaderBase * pLoader, BufferT buffer)
+void FeatureType::Deserialize(feature::LoaderBase * pLoader, TBuffer buffer)
 {
   base_type::Deserialize(pLoader, buffer);
 
   m_pLoader->InitFeature(this);
 
-  m_bHeader2Parsed = m_bPointsParsed = m_bTrianglesParsed = m_bMetadataParsed = false;
+  m_header2Parsed = m_pointsParsed = m_trianglesParsed = m_metadataParsed = false;
 
   m_innerStats.MakeZero();
 }
 
+void FeatureType::ParseEverything() const
+{
+  // Also calls ParseCommon() and ParseTypes().
+  ParseHeader2();
+  ParseGeometry(FeatureType::BEST_GEOMETRY);
+  ParseTriangles(FeatureType::BEST_GEOMETRY);
+  ParseMetadata();
+}
+
 void FeatureType::ParseHeader2() const
 {
-  if (!m_bHeader2Parsed)
+  if (!m_header2Parsed)
   {
     ParseCommon();
 
     m_pLoader->ParseHeader2();
-    m_bHeader2Parsed = true;
+    m_header2Parsed = true;
   }
 }
 
@@ -106,7 +173,7 @@ void FeatureType::ResetGeometry() const
   if (GetFeatureType() != GEOM_POINT)
     m_limitRect = m2::RectD();
 
-  m_bHeader2Parsed = m_bPointsParsed = m_bTrianglesParsed = false;
+  m_header2Parsed = m_pointsParsed = m_trianglesParsed = false;
 
   m_pLoader->ResetGeometry();
 }
@@ -114,12 +181,12 @@ void FeatureType::ResetGeometry() const
 uint32_t FeatureType::ParseGeometry(int scale) const
 {
   uint32_t sz = 0;
-  if (!m_bPointsParsed)
+  if (!m_pointsParsed)
   {
     ParseHeader2();
 
     sz = m_pLoader->ParseGeometry(scale);
-    m_bPointsParsed = true;
+    m_pointsParsed = true;
   }
   return sz;
 }
@@ -127,28 +194,98 @@ uint32_t FeatureType::ParseGeometry(int scale) const
 uint32_t FeatureType::ParseTriangles(int scale) const
 {
   uint32_t sz = 0;
-  if (!m_bTrianglesParsed)
+  if (!m_trianglesParsed)
   {
     ParseHeader2();
 
     sz = m_pLoader->ParseTriangles(scale);
-    m_bTrianglesParsed = true;
+    m_trianglesParsed = true;
   }
   return sz;
 }
 
 void FeatureType::ParseMetadata() const
 {
-  if (m_bMetadataParsed) return;
+  if (m_metadataParsed) return;
 
   m_pLoader->ParseMetadata();
 
-  if (HasInternet())
-    m_metadata.Add(Metadata::FMD_INTERNET, "wlan");
-
-  m_bMetadataParsed = true;
+  m_metadataParsed = true;
 }
 
+StringUtf8Multilang const & FeatureType::GetNames() const
+{
+  ParseCommon();
+  return m_params.name;
+}
+
+void FeatureType::SetNames(StringUtf8Multilang const & newNames)
+{
+  m_params.name.Clear();
+  // Validate passed string to clean up empty names (if any).
+  newNames.ForEach([this](int8_t langCode, string const & name) {
+    if (!name.empty())
+      m_params.name.AddString(langCode, name);
+  });
+
+  if (m_params.name.IsEmpty())
+    SetHeader(~feature::HEADER_HAS_NAME & Header());
+  else
+    SetHeader(feature::HEADER_HAS_NAME | Header());
+}
+
+void FeatureType::SetMetadata(feature::Metadata const & newMetadata)
+{
+  m_metadataParsed = true;
+  m_metadata = newMetadata;
+}
+
+void FeatureType::UpdateHeader(bool commonParsed, bool metadataParsed)
+{
+  feature::EHeaderTypeMask geomType =
+      static_cast<feature::EHeaderTypeMask>(Header() & feature::HEADER_GEOTYPE_MASK);
+  if (!geomType)
+  {
+    geomType = m_params.house.IsEmpty() && !m_params.ref.empty() ? feature::HEADER_GEOM_POINT
+                                                                 : feature::HEADER_GEOM_POINT_EX;
+  }
+
+  m_header = feature::CalculateHeader(GetTypesCount(), geomType, m_params);
+  m_header2Parsed = true;
+  m_typesParsed = true;
+
+  m_commonParsed = commonParsed;
+  m_metadataParsed = metadataParsed;
+}
+
+bool FeatureType::UpdateMetadataValue(string const & key, string const & value)
+{
+  feature::Metadata::EType mdType;
+  if (!feature::Metadata::TypeFromString(key, mdType))
+    return false;
+  m_metadata.Set(mdType, value);
+  return true;
+}
+
+void FeatureType::ForEachMetadataItem(
+    bool skipSponsored, function<void(string const & tag, string const & value)> const & fn) const
+{
+  for (auto const type : m_metadata.GetPresentTypes())
+  {
+    if (skipSponsored && m_metadata.IsSponsoredType(static_cast<feature::Metadata::EType>(type)))
+      continue;
+    auto const attributeName = ToString(static_cast<feature::Metadata::EType>(type));
+    fn(attributeName, m_metadata.Get(type));
+  }
+}
+
+void FeatureType::SetCenter(m2::PointD const & pt)
+{
+  ASSERT_EQUAL(GetFeatureType(), GEOM_POINT, ("Only for point feature."));
+  m_center = pt;
+  m_limitRect.Add(m_center);
+  m_pointsParsed = m_trianglesParsed = true;
+}
 
 namespace
 {
@@ -162,7 +299,7 @@ namespace
 
 string FeatureType::DebugString(int scale) const
 {
-  ParseAll(scale);
+  ParseGeometryAndTriangles(scale);
 
   string s = base_type::DebugString();
 
@@ -197,7 +334,7 @@ string DebugPrint(FeatureType const & ft)
 
 bool FeatureType::IsEmptyGeometry(int scale) const
 {
-  ParseAll(scale);
+  ParseGeometryAndTriangles(scale);
 
   switch (GetFeatureType())
   {
@@ -209,7 +346,7 @@ bool FeatureType::IsEmptyGeometry(int scale) const
 
 m2::RectD FeatureType::GetLimitRect(int scale) const
 {
-  ParseAll(scale);
+  ParseGeometryAndTriangles(scale);
 
   if (m_triangles.empty() && m_points.empty() && (GetFeatureType() != GEOM_POINT))
   {
@@ -222,7 +359,7 @@ m2::RectD FeatureType::GetLimitRect(int scale) const
   return m_limitRect;
 }
 
-void FeatureType::ParseAll(int scale) const
+void FeatureType::ParseGeometryAndTriangles(int scale) const
 {
   ParseGeometry(scale);
   ParseTriangles(scale);
@@ -246,85 +383,83 @@ FeatureType::geom_stat_t FeatureType::GetTrianglesSize(int scale) const
   return geom_stat_t(sz, m_triangles.size());
 }
 
-struct BestMatchedLangNames
+void FeatureType::GetPreferredNames(string & primary, string & secondary) const
 {
-  string m_defaultName;
-  string m_nativeName;
-  string m_intName;
-  string m_englishName;
+  if (!HasName())
+    return;
 
-  bool operator()(int8_t code, string const & name)
-  {
-    static int8_t defaultCode = StringUtf8Multilang::GetLangIndex("default");
-    static int8_t const nativeCode = StringUtf8Multilang::GetLangIndex(languages::GetCurrentNorm());
-    static int8_t const intCode = StringUtf8Multilang::GetLangIndex("int_name");
-    static int8_t const englishCode = StringUtf8Multilang::GetLangIndex("en");
+  auto const mwmInfo = GetID().m_mwmId.GetInfo();
 
-    if (code == defaultCode)
-      m_defaultName = name;
-    else if (code == nativeCode)
-      m_nativeName = name;
-    else if (code == intCode)
-    {
-      // There are many "junk" names in Arabian island.
-      m_intName = name.substr(0, name.find_first_of(','));
-      // int_name should be used as name:en when name:en not found
-      if ((nativeCode == englishCode) && m_nativeName.empty())
-        m_nativeName = m_intName;
-    }
-    else if (code == englishCode)
-      m_englishName = name;
-    return true;
-  }
-};
+  if (!mwmInfo)
+    return;
 
-void FeatureType::GetPreferredNames(string & defaultName, string & intName) const
-{
   ParseCommon();
 
-  BestMatchedLangNames matcher;
-  ForEachNameRef(matcher);
+  auto const deviceLang = StringUtf8Multilang::GetLangIndex(languages::GetCurrentNorm());
+  ::GetPreferredNames(mwmInfo->GetRegionData(), GetNames(), deviceLang, false /* allowTranslit */,
+                      primary, secondary);
+}
 
-  defaultName.swap(matcher.m_defaultName);
+void FeatureType::GetPreferredNames(bool allowTranslit, int8_t deviceLang, string & primary, string & secondary) const
+{
+  if (!HasName())
+    return;
 
-  if (!matcher.m_nativeName.empty())
-    intName.swap(matcher.m_nativeName);
-  else if (!matcher.m_intName.empty())
-    intName.swap(matcher.m_intName);
-  else
-    intName.swap(matcher.m_englishName);
+  auto const mwmInfo = GetID().m_mwmId.GetInfo();
 
-  if (defaultName.empty())
-    defaultName.swap(intName);
-  else
-  {
-    // filter out similar intName
-    if (!intName.empty() && defaultName.find(intName) != string::npos)
-      intName.clear();
-  }
+  if (!mwmInfo)
+    return;
+
+  ParseCommon();
+
+  ::GetPreferredNames(mwmInfo->GetRegionData(), GetNames(), deviceLang, allowTranslit,
+                      primary, secondary);
 }
 
 void FeatureType::GetReadableName(string & name) const
 {
+  if (!HasName())
+    return;
+
+  auto const mwmInfo = GetID().m_mwmId.GetInfo();
+
+  if (!mwmInfo)
+    return;
+
   ParseCommon();
 
-  BestMatchedLangNames matcher;
-  ForEachNameRef(matcher);
+  auto const deviceLang = StringUtf8Multilang::GetLangIndex(languages::GetCurrentNorm());
+  ::GetReadableName(mwmInfo->GetRegionData(), GetNames(), deviceLang, false /* allowTranslit */,
+                    name);
+}
 
-  if (!matcher.m_nativeName.empty())
-    name.swap(matcher.m_nativeName);
-  else if (!matcher.m_defaultName.empty())
-    name.swap(matcher.m_defaultName);
-  else if (!matcher.m_intName.empty())
-    name.swap(matcher.m_intName);
-  else
-    name.swap(matcher.m_englishName);
+void FeatureType::GetReadableName(bool allowTranslit, int8_t deviceLang, string & name) const
+{
+  if (!HasName())
+    return;
+
+  auto const mwmInfo = GetID().m_mwmId.GetInfo();
+
+  if (!mwmInfo)
+    return;
+
+  ParseCommon();
+
+  ::GetReadableName(mwmInfo->GetRegionData(), GetNames(), deviceLang, allowTranslit, name);
 }
 
 string FeatureType::GetHouseNumber() const
 {
   ParseCommon();
   return m_params.house.Get();
+}
+
+void FeatureType::SetHouseNumber(string const & number)
+{
+  if (number.empty())
+    m_params.house.Clear();
+  else
+    m_params.house.Set(number);
 }
 
 bool FeatureType::GetName(int8_t lang, string & name) const
@@ -342,10 +477,9 @@ uint8_t FeatureType::GetRank() const
   return m_params.rank;
 }
 
-uint32_t FeatureType::GetPopulation() const
+uint64_t FeatureType::GetPopulation() const
 {
-  uint8_t const r = GetRank();
-  return (r == 0 ? 1 : static_cast<uint32_t>(pow(1.1, r)));
+  return feature::RankToPopulation(GetRank());
 }
 
 string FeatureType::GetRoadNumber() const
@@ -354,110 +488,14 @@ string FeatureType::GetRoadNumber() const
   return m_params.ref;
 }
 
-bool FeatureType::HasInternet() const
-{
-  ParseTypes();
-
-  bool res = false;
-
-  ForEachType([&res](uint32_t type)
-  {
-    if (!res)
-    {
-      static const uint32_t t1 = classif().GetTypeByPath({"internet_access"});
-
-      ftype::TruncValue(type, 1);
-      res = (type == t1);
-    }
-  });
-
-  return res;
-}
-
-namespace
-{
-  class DoCalcDistance
-  {
-    m2::PointD m_prev, m_pt;
-    bool m_hasPrev;
-
-    static double Inf() { return numeric_limits<double>::max(); }
-
-    static double GetDistance(m2::PointD const & p1, m2::PointD const & p2, m2::PointD const & p)
-    {
-      m2::DistanceToLineSquare<m2::PointD> calc;
-      calc.SetBounds(p1, p2);
-      return sqrt(calc(p));
-    }
-
-  public:
-    DoCalcDistance(m2::PointD const & pt)
-      : m_pt(pt), m_hasPrev(false), m_dist(Inf())
-    {
-    }
-
-    void TestPoint(m2::PointD const & p)
-    {
-      m_dist = m_pt.Length(p);
-    }
-
-    void operator() (m2::PointD const & pt)
-    {
-      if (m_hasPrev)
-        m_dist = min(m_dist, GetDistance(m_prev, pt, m_pt));
-      else
-        m_hasPrev = true;
-
-      m_prev = pt;
-    }
-
-    void operator() (m2::PointD const & p1, m2::PointD const & p2, m2::PointD const & p3)
-    {
-      m2::PointD arrP[] = { p1, p2, p3 };
-
-      // make right-oriented triangle
-      if (m2::robust::OrientedS(arrP[0], arrP[1], arrP[2]) < 0.0)
-        swap(arrP[1], arrP[2]);
-
-      double d = Inf();
-      for (size_t i = 0; i < 3; ++i)
-      {
-        double const s = m2::robust::OrientedS(arrP[i], arrP[(i + 1) % 3], m_pt);
-        if (s < 0.0)
-          d = min(d, GetDistance(arrP[i], arrP[(i + 1) % 3], m_pt));
-      }
-
-      m_dist = ((d == Inf()) ? 0.0 : min(m_dist, d));
-    }
-
-    double m_dist;
-  };
-}
-
-double FeatureType::GetDistance(m2::PointD const & pt, int scale) const
-{
-  DoCalcDistance calc(pt);
-
-  switch (GetFeatureType())
-  {
-  case GEOM_POINT: calc.TestPoint(GetCenter()); break;
-  case GEOM_LINE: ForEachPointRef(calc, scale); break;
-  case GEOM_AREA: ForEachTriangleRef(calc, scale); break;
-  default:
-    CHECK ( false, () );
-  }
-
-  return calc.m_dist;
-}
-
 void FeatureType::SwapGeometry(FeatureType & r)
 {
-  ASSERT_EQUAL(m_bPointsParsed, r.m_bPointsParsed, ());
-  ASSERT_EQUAL(m_bTrianglesParsed, r.m_bTrianglesParsed, ());
+  ASSERT_EQUAL(m_pointsParsed, r.m_pointsParsed, ());
+  ASSERT_EQUAL(m_trianglesParsed, r.m_trianglesParsed, ());
 
-  if (m_bPointsParsed)
+  if (m_pointsParsed)
     m_points.swap(r.m_points);
 
-  if (m_bTrianglesParsed)
+  if (m_trianglesParsed)
     m_triangles.swap(r.m_triangles);
 }

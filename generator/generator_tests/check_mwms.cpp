@@ -11,12 +11,19 @@
 
 #include "base/logging.hpp"
 
+#include <cstdint>
+#include <map>
+#include <memory>
+#include <vector>
+
+using namespace std;
 
 UNIT_TEST(CheckMWM_LoadAll)
 {
   Platform & platform = GetPlatform();
   vector<platform::LocalCountryFile> localFiles;
-  platform::FindAllLocalMapsInDirectory(platform.WritableDir(), 0 /* version */, localFiles);
+  platform::FindAllLocalMapsInDirectoryAndCleanup(platform.WritableDir(), 0 /* version */,
+                                                  -1 /* latestVersion */, localFiles);
 
   model::FeaturesFetcher m;
   m.InitClassificator();
@@ -49,9 +56,12 @@ UNIT_TEST(CheckMWM_GeomIndex)
   VarSerialVectorReader<ReaderT> treesReader(source);
 
   // Make interval index objects for each scale bucket.
-  vector<unique_ptr<IntervalIndex<ReaderT>>> scale2Index;
+  vector<unique_ptr<IntervalIndex<ReaderT, uint32_t>>> scale2Index;
   for (size_t i = 0; i < treesReader.Size(); ++i)
-    scale2Index.emplace_back(new IntervalIndex<ReaderT>(treesReader.SubReader(static_cast<uint32_t>(i))));
+  {
+    scale2Index.emplace_back(make_unique<IntervalIndex<ReaderT, uint32_t>>(
+        treesReader.SubReader(static_cast<uint32_t>(i))));
+  }
 
   // Pass full coverage as input for test.
   uint64_t beg = 0;

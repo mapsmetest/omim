@@ -1,6 +1,8 @@
 #pragma once
 
-#include "std/utility.hpp"
+#include "routing/vehicle_mask.hpp"
+
+#include "base/assert.hpp"
 
 namespace routing
 {
@@ -10,6 +12,13 @@ namespace routing
 /// For example, route matching properties, rerouting properties and so on.
 struct RoutingSettings
 {
+  friend RoutingSettings GetRoutingSettings(VehicleType vehicleType);
+
+private:
+  RoutingSettings(bool matchRoute, bool soundDirection, double matchingThresholdM,
+                  bool keepPedestrianInfo, bool showTurnAfterNext, bool speedCameraWarning);
+
+public:
   /// \brief if m_matchRoute is equal to true the bearing follows the
   /// route direction if the current position is matched to the route.
   /// If m_matchRoute is equal to false GPS bearing is used while
@@ -32,19 +41,10 @@ struct RoutingSettings
   /// \brief if m_showTurnAfterNext is equal to true end users see a notification
   /// about the turn after the next in some cases.
   bool m_showTurnAfterNext;
+
+  /// \brief m_speedCameraWarning is a flag for enabling user notifications about speed cameras.
+  bool m_speedCameraWarning;
 };
 
-inline RoutingSettings GetPedestrianRoutingSettings()
-{
-  return RoutingSettings({ false /* m_matchRoute */, false /* m_soundDirection */,
-                           20. /* m_matchingThresholdM */, true /* m_keepPedestrianInfo */,
-                           false /* m_showTurnAfterNext */});
-}
-
-inline RoutingSettings GetCarRoutingSettings()
-{
-  return RoutingSettings({ true /* m_matchRoute */, true /* m_soundDirection */,
-                           50. /* m_matchingThresholdM */, false /* m_keepPedestrianInfo */,
-                           true /* m_showTurnAfterNext */});
-}
+RoutingSettings GetRoutingSettings(VehicleType vehicleType);
 }  // namespace routing

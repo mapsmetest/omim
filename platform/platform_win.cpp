@@ -10,8 +10,9 @@
 
 #include <direct.h>
 #include <shlobj.h>
-#include <sys/types.h>
+#include <shlwapi.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 
 static bool GetUserWritableDir(string & outDir)
 {
@@ -94,6 +95,19 @@ bool Platform::IsFileExistsByFullPath(string const & filePath)
   return ::GetFileAttributesA(filePath.c_str()) != INVALID_FILE_ATTRIBUTES;
 }
 
+//static
+void Platform::DisableBackupForFile(string const & filePath) {}
+
+// static
+string Platform::GetCurrentWorkingDirectory() noexcept
+{
+  char path[PATH_MAX];
+  char const * const dir = getcwd(path, PATH_MAX);
+  if (dir == nullptr)
+    return {};
+  return dir;
+}
+
 // static
 Platform::EError Platform::RmDir(string const & dirName)
 {
@@ -122,13 +136,24 @@ string Platform::UniqueClientId() const
   return "@TODO";
 }
 
-void Platform::RunOnGuiThread(TFunctor const & fn)
+string Platform::MacAddress(bool md5Decoded) const
 {
-  /// @todo
-  fn();
+  // Not implemented.
+  UNUSED_VALUE(md5Decoded);
+  return {};
 }
 
-void Platform::RunAsync(TFunctor const & fn, Priority p)
+string Platform::DeviceName() const
+{
+  return OMIM_OS_NAME;
+}
+
+string Platform::DeviceModel() const
+{
+  return {};
+}
+
+void Platform::RunOnGuiThread(TFunctor const & fn)
 {
   /// @todo
   fn();
@@ -138,6 +163,11 @@ Platform::EConnectionType Platform::ConnectionStatus()
 {
   // @TODO Add implementation
   return EConnectionType::CONNECTION_NONE;
+}
+
+Platform::ChargingStatus Platform::GetChargingStatus()
+{
+  return Platform::ChargingStatus::Plugged;
 }
 
 Platform::TStorageStatus Platform::GetWritableStorageStatus(uint64_t neededSize) const
@@ -155,6 +185,11 @@ Platform::TStorageStatus Platform::GetWritableStorageStatus(uint64_t neededSize)
   return STORAGE_OK;
 }
 
+bool Platform::IsDirectoryEmpty(string const & directory)
+{
+  return PathIsDirectoryEmptyA(directory.c_str());
+}
+
 bool Platform::GetFileSizeByFullPath(string const & filePath, uint64_t & size)
 {
   HANDLE hFile = CreateFileA(filePath.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -169,8 +204,4 @@ bool Platform::GetFileSizeByFullPath(string const & filePath, uint64_t & size)
     }
   }
   return false;
-}
-
-void Platform::GetSystemFontNames(FilesList & res) const
-{
 }

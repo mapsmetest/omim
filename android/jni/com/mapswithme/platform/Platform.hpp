@@ -4,27 +4,76 @@
 
 #include "platform/platform.hpp"
 
+#include <memory>
+#include <string>
+
+namespace base
+{
+class TaskLoop;
+}
 
 namespace android
 {
-  class Platform : public ::Platform
+class Platform : public ::Platform
+{
+public:
+  Platform();
+
+  void Initialize(JNIEnv * env, jobject functorProcessObject, jstring apkPath, jstring storagePath,
+                  jstring privatePath, jstring tmpPath, jstring obbGooglePath, jstring flavorName,
+                  jstring buildType, bool isTablet);
+
+  ~Platform() override;
+
+  void OnExternalStorageStatusChanged(bool isAvailable);
+
+  /// get storage path without ending "/MapsWithMe/"
+  std::string GetStoragePathPrefix() const;
+  /// assign storage path (should contain ending "/MapsWithMe/")
+  void SetWritableDir(std::string const & dir);
+  void SetSettingsDir(std::string const & dir);
+
+  bool HasAvailableSpaceForWriting(uint64_t size) const;
+
+  template <typename Task>
+  void RunOnGuiThread(Task && task)
+  {
+    ASSERT(m_guiThread, ());
+    m_guiThread->Push(std::forward<Task>(task));
+  }
+
+  void SendPushWooshTag(std::string const & tag, std::vector<std::string> const & values);
+  void SendMarketingEvent(std::string const & tag, std::map<std::string, std::string> const & params);
+
+  void SetGuiThread(std::unique_ptr<base::TaskLoop> guiThread);
+
+  class AndroidSecureStorage
   {
   public:
-    void Initialize(JNIEnv * env,
-                    jstring apkPath, jstring storagePath,
-                    jstring tmpPath, jstring obbGooglePath,
-                    jstring flavorName, jstring buildType,
-                    bool isYota, bool isTablet);
+    void Save(std::string const & key, std::string const & value);
+    bool Load(std::string const & key, std::string & value);
+    void Remove(std::string const & key);
 
-    /// get storage path without ending "/MapsWithMe/"
-    string GetStoragePathPrefix() const;
-    /// assign storage path (should contain ending "/MapsWithMe/")
-    void SetStoragePath(string const & path);
+  private:
+    void Init(JNIEnv * env);
 
-    bool HasAvailableSpaceForWriting(uint64_t size) const;
-
-    static void RunOnGuiThreadImpl(TFunctor const & fn, bool blocking = false);
-
-    static Platform & Instance();
+    jclass m_secureStorageClass = nullptr;
   };
-}
+
+  AndroidSecureStorage & GetSecureStorage() { return m_secureStorage; }
+
+  static Platform & Instance();
+
+private:
+  jobject m_functorProcessObject = nullptr;
+  jmethodID m_sendPushWooshTagsMethod = nullptr;
+  jmethodID m_sendAppsFlyerTagsMethod = nullptr;
+  jmethodID m_myTrackerTrackMethod = nullptr;
+  AndroidSecureStorage m_secureStorage;
+
+  std::unique_ptr<base::TaskLoop> m_guiThread;
+};
+
+extern int GetAndroidSdkVersion();
+
+} // namespace android

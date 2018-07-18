@@ -1,5 +1,3 @@
-#include "base/SRC_FIRST.hpp"
-
 #include "map/feature_vec_model.hpp"
 
 #include "platform/platform.hpp"
@@ -20,12 +18,12 @@ namespace model
 {
 FeaturesFetcher::FeaturesFetcher()
 {
-  m_multiIndex.AddObserver(*this);
+  m_dataSource.AddObserver(*this);
 }
 
 FeaturesFetcher::~FeaturesFetcher()
 {
-  m_multiIndex.RemoveObserver(*this);
+  m_dataSource.RemoveObserver(*this);
 }
 
 // While reading any files (classificator or mwm), there are 2 types of possible exceptions:
@@ -49,17 +47,17 @@ pair<MwmSet::MwmId, MwmSet::RegResult> FeaturesFetcher::RegisterMap(
 {
   try
   {
-    auto result = m_multiIndex.RegisterMap(localFile);
+    auto result = m_dataSource.RegisterMap(localFile);
     if (result.second != MwmSet::RegResult::Success)
     {
-      LOG(LWARNING, ("Can't add map", localFile.GetCountryName(),
+      LOG(LWARNING, ("Can't add map", localFile.GetCountryName(), "(", result.second, ").",
                      "Probably it's already added or has newer data version."));
     }
     else
     {
       MwmSet::MwmId const & id = result.first;
       ASSERT(id.IsAlive(), ());
-      m_rect.Add(id.GetInfo()->m_limitRect);
+      m_rect.Add(id.GetInfo()->m_bordersRect);
     }
 
     return result;
@@ -73,14 +71,21 @@ pair<MwmSet::MwmId, MwmSet::RegResult> FeaturesFetcher::RegisterMap(
 
 bool FeaturesFetcher::DeregisterMap(CountryFile const & countryFile)
 {
-  return m_multiIndex.Deregister(countryFile);
+  return m_dataSource.Deregister(countryFile);
 }
 
-void FeaturesFetcher::Clear() { m_multiIndex.Clear(); }
+void FeaturesFetcher::Clear() { m_dataSource.Clear(); }
 
 void FeaturesFetcher::ClearCaches()
 {
-  m_multiIndex.ClearCache();
+  m_dataSource.ClearCache();
+}
+
+void FeaturesFetcher::OnMapUpdated(platform::LocalCountryFile const & newFile,
+                                   platform::LocalCountryFile const & oldFile)
+{
+  if (m_onMapDeregistered)
+    m_onMapDeregistered(oldFile);
 }
 
 void FeaturesFetcher::OnMapDeregistered(platform::LocalCountryFile const & localFile)

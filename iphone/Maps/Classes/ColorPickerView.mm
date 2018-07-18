@@ -13,20 +13,20 @@
 
 struct Tcolor
 {
-  NSString * color;
+  kml::PredefinedColor color;
   float rgb[3];
 };
 
 static Tcolor const g_color [] =
 {
-  {@"placemark-red", {255, 51, 51}},
-  {@"placemark-yellow", {255, 255, 51}},
-  {@"placemark-blue", {51, 204, 255}},
-  {@"placemark-green", {102, 255, 51}},
-  {@"placemark-purple", {153, 51, 255}},
-  {@"placemark-orange", {255, 102, 0}},
-  {@"placemark-brown", {102, 51, 0}},
-  {@"placemark-pink", {255, 51, 255}},
+  {kml::PredefinedColor::Red, {255, 51, 51}},
+  {kml::PredefinedColor::Yellow, {255, 255, 51}},
+  {kml::PredefinedColor::Blue, {51, 204, 255}},
+  {kml::PredefinedColor::Green, {102, 255, 51}},
+  {kml::PredefinedColor::Purple, {153, 51, 255}},
+  {kml::PredefinedColor::Orange, {255, 102, 0}},
+  {kml::PredefinedColor::Brown, {102, 51, 0}},
+  {kml::PredefinedColor::Pink, {255, 51, 255}},
 };
 
 @implementation ColorPickerView
@@ -43,8 +43,8 @@ static Tcolor const g_color [] =
                             UIViewAutoresizingFlexibleTopMargin|UIViewAutoresizingFlexibleBottomMargin;
 
     UILabel * header = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, customWidth, HEADERHEIGHT)];
-    header.backgroundColor = [UIColor clearColor];
-    header.text = NSLocalizedString(@"bookmark_color", nil);
+    header.backgroundColor = UIColor.clearColor;
+    header.text = L(@"bookmark_color");
     header.font = [UIFont fontWithName:@"Helvetica" size:20];
     header.textAlignment = NSTextAlignmentCenter;
     header.textColor = [UIColor colorWithRed:51/255.f green:204/255.f blue:255/255.f alpha:1];
@@ -59,7 +59,7 @@ static Tcolor const g_color [] =
     for (size_t i = 0; i < 8; ++i)
     {
       UIButton * button = [[UIButton alloc] initWithFrame:CGRectMake(BORDERMARGIN + (i % 4) * (buttonDiameter + BUTTONMARGIN), BORDERMARGIN + (i / 4) * (buttonDiameter + BUTTONMARGINHEIGHT) + HEADERHEIGHT + LINEHEIGHT, buttonDiameter, buttonDiameter)];
-      UIColor * c = [ColorPickerView buttonColor:i];
+      UIColor * c = [[self class] buttonColor:i];
       if (i != selectedIndex)
         [button setBackgroundImage:[CircleView createCircleImageWith:buttonDiameter andColor:c] forState:UIControlStateNormal];
       else
@@ -95,24 +95,24 @@ static Tcolor const g_color [] =
 
 
 //store here temporary
-+ (UIColor *)colorForName:(NSString *)name
++ (UIColor *)getUIColor:(kml::PredefinedColor)color
 {
-  size_t const index = [self getColorIndex:name];
+  size_t const index = [self getColorIndex:color];
   return [self buttonColor:index];
 }
 
-+ (NSString *)colorName:(size_t)index
++ (kml::PredefinedColor)colorValue:(size_t)index
 {
   if (index < ARRAY_SIZE(g_color))
     return g_color[index].color;
   NSLog(@"WARNING! Color doesn't exist");
-  return @"";
+  return kml::PredefinedColor::None;
 }
 
-+ (size_t)getColorIndex:(NSString *)name
++ (size_t)getColorIndex:(kml::PredefinedColor)color
 {
   for (size_t i = 0; i < ARRAY_SIZE(g_color); ++i)
-    if ([name isEqualToString:g_color[i].color])
+    if (color == g_color[i].color)
       return i;
   return 0;
 }

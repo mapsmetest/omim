@@ -10,11 +10,13 @@
 #include "geometry/point2d.hpp"
 #include "geometry/rect2d.hpp"
 
-#include "std/map.hpp"
+#include <map>
+#include <mutex>
+#include <string>
+#include <utility>
 
 namespace dp
 {
-
 class StipplePenKey : public Texture::Key
 {
 public:
@@ -39,7 +41,7 @@ private:
   void Init(buffer_vector<uint8_t, 8> const & pattern);
 
 private:
-  friend string DebugPrint(StipplePenHandle const & );
+  friend std::string DebugPrint(StipplePenHandle const &);
   uint64_t m_keyValue;
 };
 
@@ -51,7 +53,6 @@ public:
 
   uint32_t GetSize() const;
   uint32_t GetPatternSize() const;
-  uint32_t GetBufferSize() const;
 
   void Rasterize(void * buffer);
 
@@ -90,46 +91,49 @@ public:
 
 private:
   m2::PointU m_canvasSize;
-  buffer_vector<uint32_t, 4> m_columns;
-  uint32_t m_currentColumn;
+  uint32_t m_currentRow;
 };
 
 class StipplePenIndex
 {
 public:
   StipplePenIndex(m2::PointU const & canvasSize) : m_packer(canvasSize) {}
-  RefPointer<Texture::ResourceInfo> MapResource(StipplePenKey const & key);
-  void UploadResources(RefPointer<Texture> texture);
-  glConst GetMinFilter() const;
-  glConst GetMagFilter() const;
+  ref_ptr<Texture::ResourceInfo> ReserveResource(bool predefined, StipplePenKey const & key, bool & newResource);
+  ref_ptr<Texture::ResourceInfo> MapResource(StipplePenKey const & key, bool & newResource);
+  void UploadResources(ref_ptr<Texture> texture);
 
 private:
-  typedef map<StipplePenHandle, StipplePenResourceInfo> TResourceMapping;
-  typedef pair<m2::RectU, StipplePenRasterizator> TPendingNode;
+  typedef std::map<StipplePenHandle, StipplePenResourceInfo> TResourceMapping;
+  typedef std::pair<m2::RectU, StipplePenRasterizator> TPendingNode;
   typedef buffer_vector<TPendingNode, 32> TPendingNodes;
 
+  TResourceMapping m_predefinedResourceMapping;
   TResourceMapping m_resourceMapping;
   TPendingNodes m_pendingNodes;
   StipplePenPacker m_packer;
+
+  std::mutex m_lock;
+  std::mutex m_mappingLock;
 };
 
-string DebugPrint(StipplePenHandle const & key);
+std::string DebugPrint(StipplePenHandle const & key);
 
 class StipplePenTexture : public DynamicTexture<StipplePenIndex, StipplePenKey, Texture::StipplePen>
 {
   typedef DynamicTexture<StipplePenIndex, StipplePenKey, Texture::StipplePen> TBase;
 public:
-  StipplePenTexture(m2::PointU const & size)
+  StipplePenTexture(m2::PointU const & size, ref_ptr<HWTextureAllocator> allocator)
     : m_index(size)
   {
-    TBase::TextureParams params{ size, TextureFormat::ALPHA, gl_const::GLNearest, gl_const::GLNearest };
-    TBase::Init(MakeStackRefPointer(&m_index), params);
+    TBase::TextureParams params{size, TextureFormat::ALPHA, gl_const::GLNearest, false /* m_usePixelBuffer */};
+    TBase::Init(allocator, make_ref(&m_index), params);
   }
 
   ~StipplePenTexture() { TBase::Reset(); }
 
+  void ReservePattern(buffer_vector<uint8_t, 8> const & pattern);
+
 private:
   StipplePenIndex m_index;
 };
-
-}
+}  // namespace dp

@@ -1,12 +1,22 @@
 package com.mapswithme.util;
 
+import android.annotation.SuppressLint;
+import android.content.ContentResolver;
+import android.content.Context;
 import android.location.Location;
+import android.location.LocationManager;
 import android.os.Build;
 import android.os.SystemClock;
+import android.provider.Settings;
+import android.text.TextUtils;
 import android.view.Surface;
 
-import com.mapswithme.maps.bookmarks.data.MapObject;
+import com.mapswithme.maps.MwmApplication;
 import com.mapswithme.maps.location.LocationHelper;
+import com.mapswithme.util.log.Logger;
+import com.mapswithme.util.log.LoggerFactory;
+
+import java.util.List;
 
 public class LocationUtils
 {
@@ -14,8 +24,8 @@ public class LocationUtils
 
   public static final long LOCATION_EXPIRATION_TIME_MILLIS_SHORT = 60 * 1000; // 1 minute
   public static final long LOCATION_EXPIRATION_TIME_MILLIS_LONG = 6 * 60 * 60 * 1000; // 6 hours
-
-  public static final double LAT_LON_EPSILON = 1E-6;
+  private static final Logger LOGGER = LoggerFactory.INSTANCE.getLogger(LoggerFactory.Type.LOCATION);
+  private static final String TAG = LocationUtils.class.getSimpleName();
 
   /**
    * Correct compass angles due to display orientation.
@@ -45,21 +55,16 @@ public class LocationUtils
 
   public static double correctAngle(double angle, double correction)
   {
-    angle += correction;
+    double res = angle + correction;
 
     final double twoPI = 2.0 * Math.PI;
-    angle = angle % twoPI;
+    res %= twoPI;
 
     // normalize angle into [0, 2PI]
-    if (angle < 0.0)
-      angle += twoPI;
+    if (res < 0.0)
+      res += twoPI;
 
-    return angle;
-  }
-
-  public static double bearingToHeading(double bearing)
-  {
-    return correctAngle(0.0, Math.toRadians(bearing));
+    return res;
   }
 
   public static boolean isExpired(Location l, long millis, long expirationMillis)
@@ -72,7 +77,7 @@ public class LocationUtils
     return (timeDiff > expirationMillis);
   }
 
-  public static double getDiffWithLastLocation(Location lastLocation, Location newLocation)
+  public static double getDiff(Location lastLocation, Location newLocation)
   {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1)
       return (newLocation.getElapsedRealtimeNanos() - lastLocation.getElapsedRealtimeNanos()) * 1.0E-9;
@@ -85,26 +90,66 @@ public class LocationUtils
         // Do compare current and previous system times in case when
         // we have incorrect time settings on a device.
         time = System.currentTimeMillis();
-        lastTime = LocationHelper.INSTANCE.getLastLocationTime();
+        lastTime = LocationHelper.INSTANCE.getSavedLocationTime();
       }
 
       return (time - lastTime) * 1.0E-3;
     }
   }
 
-  public static boolean isSameLocationProvider(String p1, String p2)
+  private static boolean isSameLocationProvider(String p1, String p2)
   {
-    return !(p1 == null || p2 == null) && p1.equals(p2);
+    return (p1 != null && p1.equals(p2));
   }
 
-  /**
-   * Detects whether object are close enough to each other, so that we can assume they represent the same poi.
-   * @param first object
-   * @param second object
-   */
-  public static boolean areLatLonEqual(MapObject first, MapObject second)
+  @SuppressLint("InlinedApi")
+  @SuppressWarnings("deprecation")
+  public static boolean areLocationServicesTurnedOn()
   {
-    return Math.abs(first.getLat() - second.getLat()) < LocationUtils.LAT_LON_EPSILON &&
-        Math.abs(first.getLon() - second.getLon()) < LocationUtils.LAT_LON_EPSILON;
+    final ContentResolver resolver = MwmApplication.get().getContentResolver();
+    try
+    {
+      return Build.VERSION.SDK_INT < Build.VERSION_CODES.KITKAT
+             ? !TextUtils.isEmpty(Settings.Secure.getString(resolver, Settings.Secure.LOCATION_PROVIDERS_ALLOWED))
+             : Settings.Secure.getInt(resolver, Settings.Secure.LOCATION_MODE) != Settings.Secure.LOCATION_MODE_OFF;
+    } catch (Settings.SettingNotFoundException e)
+    {
+      e.printStackTrace();
+      return false;
+    }
+  }
+
+  private static void logAvailableProviders()
+  {
+    LocationManager locMngr = (LocationManager) MwmApplication.get().getSystemService(Context.LOCATION_SERVICE);
+    List<String> providers = locMngr.getProviders(true);
+    StringBuilder sb;
+    if (!providers.isEmpty())
+    {
+      sb = new StringBuilder("Available location providers:");
+      for (String provider : providers)
+        sb.append(" ").append(provider);
+    }
+    else
+    {
+      sb = new StringBuilder("There are no enabled location providers!");
+    }
+    LOGGER.i(TAG, sb.toString());
+  }
+
+  public static boolean checkProvidersAvailability()
+  {
+    Context context = MwmApplication.get();
+    LocationManager locationManager = (LocationManager) context.getSystemService(Context.LOCATION_SERVICE);
+    if (locationManager == null)
+    {
+      LOGGER.e(TAG, "This device doesn't support the location service.");
+      return false;
+    }
+
+    boolean networkEnabled = locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
+    boolean gpsEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER);
+    LocationUtils.logAvailableProviders();
+    return networkEnabled || gpsEnabled;
   }
 }

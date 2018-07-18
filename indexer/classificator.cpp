@@ -1,11 +1,13 @@
 #include "indexer/classificator.hpp"
+#include "indexer/map_style_reader.hpp"
 #include "indexer/tree_structure.hpp"
 
-#include "base/macros.hpp"
 #include "base/logging.hpp"
+#include "base/macros.hpp"
+#include "base/string_utils.hpp"
 
-#include "std/bind.hpp"
 #include "std/algorithm.hpp"
+#include "std/bind.hpp"
 #include "std/iterator.hpp"
 
 namespace
@@ -38,9 +40,9 @@ ClassifObject * ClassifObject::Add(string const & s)
 
 ClassifObject * ClassifObject::Find(string const & s)
 {
-  for (iter_t i = m_objs.begin(); i != m_objs.end(); ++i)
-    if ((*i).m_name == s)
-      return &(*i);
+  for (auto & obj : m_objs)
+    if (obj.m_name == s)
+      return &obj;
 
   return 0;
 }
@@ -56,7 +58,7 @@ void ClassifObject::AddDrawRule(drule::Key const & k)
 
 ClassifObjectPtr ClassifObject::BinaryFind(string const & s) const
 {
-  const_iter_t i = lower_bound(m_objs.begin(), m_objs.end(), s, less_name_t());
+  auto const i = lower_bound(m_objs.begin(), m_objs.end(), s, less_name_t());
   if ((i == m_objs.end()) || ((*i).m_name != s))
     return ClassifObjectPtr(0, 0);
   else
@@ -119,16 +121,24 @@ void ClassifObject::ConcatChildNames(string & s) const
 // Classificator implementation
 /////////////////////////////////////////////////////////////////////////////////////////
 
+namespace
+{
+Classificator & classif(MapStyle mapStyle)
+{
+  static Classificator c[MapStyleCount];
+  return c[mapStyle];
+}
+} // namespace
+
 Classificator & classif()
 {
-  static Classificator c;
-  return c;
+  return classif(GetStyleReader().GetCurrentStyle());
 }
 
 namespace ftype
 {
-  uint8_t const bits_count = 6;
-  uint8_t const levels_count = 5;
+  uint8_t const bits_count = 7;
+  uint8_t const levels_count = 4;
   uint8_t const max_value = (1 << bits_count) - 1;
 
   void set_value(uint32_t & type, uint8_t level, uint8_t value)
@@ -186,8 +196,6 @@ namespace ftype
 
   bool GetValue(uint32_t type, uint8_t level, uint8_t & value)
   {
-    ASSERT ( level < levels_count, ("invalid input level", level) );
-
     if (level < get_control_level(type))
     {
       value = get_value(type, level);
@@ -229,7 +237,7 @@ namespace ftype
   {
     return get_control_level(type);
   }
-}
+} // namespace ftype
 
 namespace
 {
@@ -271,7 +279,7 @@ namespace
         add_rule(ft, i++);
     }
   };
-}
+} // namespace
 
 void ClassifObject::GetSuitable(int scale, feature::EGeomType ft, drule::KeysT & keys) const
 {
@@ -293,10 +301,10 @@ bool ClassifObject::IsDrawable(int scale) const
 
 bool ClassifObject::IsDrawableAny() const
 {
-  return (m_visibility != visible_mask_t() && !m_drawRule.empty());
+  return (m_visibility != TVisibleMask() && !m_drawRule.empty());
 }
 
-bool ClassifObject::IsDrawableLike(feature::EGeomType ft) const
+bool ClassifObject::IsDrawableLike(feature::EGeomType ft, bool emptyName) const
 {
   ASSERT(ft >= 0 && ft <= 2, ());
 
@@ -310,12 +318,14 @@ bool ClassifObject::IsDrawableLike(feature::EGeomType ft) const
     {0, 1, 0, 0, 0, 0, 0, 0}    // farea (!!! key difference with GetSuitable !!!)
   };
 
-  for (size_t i = 0; i < m_drawRule.size(); ++i)
+  for (auto const & k : m_drawRule)
   {
-    ASSERT ( m_drawRule[i].m_type < drule::count_of_rules, () );
-    if (visible[ft][m_drawRule[i].m_type] == 1)
+    ASSERT_LESS(k.m_type, drule::count_of_rules, ());
+
+    // In case when feature name is empty we don't take into account caption drawing rules.
+    if ((visible[ft][k.m_type] == 1) &&
+        (!emptyName || (k.m_type != drule::caption && k.m_type != drule::pathtext)))
     {
-      /// @todo Check if rule's scale is reachable according to m_visibility (see GetSuitable algorithm).
       return true;
     }
   }
@@ -404,6 +414,14 @@ uint32_t Classificator::GetTypeByPath(initializer_list<char const *> const & lst
   return type;
 }
 
+uint32_t Classificator::GetTypeByReadableObjectName(string const & name) const
+{
+  ASSERT(!name.empty(), ());
+  vector<string> v;
+  strings::Tokenize(name, "-", [&v] (string const & s) { v.push_back(s); } );
+  return GetTypeByPathSafe(v);
+}
+
 void Classificator::ReadTypesMapping(istream & s)
 {
   m_mapping.Load(s);
@@ -417,13 +435,11 @@ void Classificator::Clear()
 
 string Classificator::GetReadableObjectName(uint32_t type) const
 {
-  string s = classif().GetFullObjectName(type);
-
-  // remove ending dummy symbol
+  string s = GetFullObjectName(type);
+  // Remove ending dummy symbol.
   ASSERT ( !s.empty(), () );
-  s.resize(s.size()-1);
-
-  // replace separator
+  s.pop_back();
+  // Replace separator.
   replace(s.begin(), s.end(), '|', '-');
   return s;
 }

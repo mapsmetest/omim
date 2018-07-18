@@ -1,179 +1,131 @@
 #pragma once
-#include "result.hpp"
+
+#include "search/pre_ranking_info.hpp"
+#include "search/ranking_info.hpp"
+#include "search/ranking_utils.hpp"
+#include "search/result.hpp"
+
+#include "storage/index.hpp"
 
 #include "indexer/feature_data.hpp"
 
+#include "std/set.hpp"
 
 class FeatureType;
 class CategoriesHolder;
 
 namespace storage
 {
-  class CountryInfoGetter;
-  struct CountryInfo;
+class CountryInfoGetter;
+struct CountryInfo;
 }
 
 namespace search
 {
-namespace impl
-{
+class ReverseGeocoder;
 
-template <class T> bool LessRankT(T const & r1, T const & r2);
-template <class T> bool LessDistanceT(T const & r1, T const & r2);
-
-/// First pass results class. Objects are creating during search in trie.
-/// Works fast without feature loading and provide ranking.
-class PreResult1
+// First pass results class. Objects are created during search in trie.
+// Works fast because it does not load features.
+class PreRankerResult
 {
-  friend class PreResult2;
-  template <class T> friend bool LessRankT(T const & r1, T const & r2);
-  template <class T> friend bool LessDistanceT(T const & r1, T const & r2);
+public:
+  PreRankerResult(FeatureID const & id, PreRankingInfo const & info);
+
+  static bool LessRankAndPopularity(PreRankerResult const & r1, PreRankerResult const & r2);
+  static bool LessDistance(PreRankerResult const & r1, PreRankerResult const & r2);
+
+  FeatureID const & GetId() const { return m_id; }
+  double GetDistance() const { return m_info.m_distanceToPivot; }
+  uint8_t GetRank() const { return m_info.m_rank; }
+  uint8_t GetPopularity() const { return m_info.m_popularity; }
+  PreRankingInfo & GetInfo() { return m_info; }
+  PreRankingInfo const & GetInfo() const { return m_info; }
+
+private:
+  friend class RankerResult;
 
   FeatureID m_id;
-  m2::PointD m_center;
-  double m_distance;
-  uint8_t m_rank;
-  int8_t m_viewportID;
-
-  void CalcParams(m2::PointD const & pivot);
-
-public:
-  PreResult1(FeatureID const & fID, uint8_t rank, m2::PointD const & center,
-             m2::PointD const & pivot, int8_t viewportID);
-  PreResult1(m2::PointD const & center, m2::PointD const & pivot);
-
-  static bool LessRank(PreResult1 const & r1, PreResult1 const & r2);
-  static bool LessDistance(PreResult1 const & r1, PreResult1 const & r2);
-  static bool LessPointsForViewport(PreResult1 const & r1, PreResult1 const & r2);
-
-  inline FeatureID GetID() const { return m_id; }
-  inline m2::PointD GetCenter() const { return m_center; }
-  inline uint8_t GetRank() const { return m_rank; }
-  inline int8_t GetViewportID() const { return m_viewportID; }
+  PreRankingInfo m_info;
 };
 
-
-/// Second result class. Objects are creating during reading of features.
-/// Read and fill needed info for ranking and getting final results.
-class PreResult2
+// Second result class. Objects are created during reading of features.
+// Read and fill needed info for ranking and getting final results.
+class RankerResult
 {
-  friend class PreResult2Maker;
-
-  void CalcParams(m2::PointD const & pivot);
-
 public:
-  enum ResultType
+  enum Type
   {
-    RESULT_LATLON,
-    RESULT_FEATURE,
-    RESULT_BUILDING
+    TYPE_LATLON,
+    TYPE_FEATURE,
+    TYPE_BUILDING  //!< Buildings are not filtered out in duplicates filter.
   };
 
-  /// For RESULT_FEATURE.
-  PreResult2(FeatureType const & f, PreResult1 const * p, m2::PointD const & pivot,
-             string const & displayName, string const & fileName);
+  /// For RESULT_FEATURE and RESULT_BUILDING.
+  RankerResult(FeatureType const & f, m2::PointD const & center, m2::PointD const & pivot,
+               string const & displayName, string const & fileName);
 
   /// For RESULT_LATLON.
-  PreResult2(double lat, double lon);
-
-  /// For RESULT_BUILDING.
-  PreResult2(m2::PointD const & pt, string const & str, uint32_t type);
-
-  /// @param[in]  pInfo   Need to get region for result.
-  /// @param[in]  pCat    Categories need to display readable type string.
-  /// @param[in]  pTypes  Set of preffered types that match input tokens by categories.
-  /// @param[in]  lang    Current system language.
-  Result GenerateFinalResult(storage::CountryInfoGetter const * pInfo,
-                             CategoriesHolder const * pCat,
-                             set<uint32_t> const * pTypes, int8_t locale) const;
-
-  Result GeneratePointResult(storage::CountryInfoGetter const * pInfo,
-                             CategoriesHolder const * pCat,
-                             set<uint32_t> const * pTypes, int8_t locale) const;
-
-  static bool LessRank(PreResult2 const & r1, PreResult2 const & r2);
-  static bool LessDistance(PreResult2 const & r1, PreResult2 const & r2);
-
-  /// Filter equal features for different mwm's.
-  class StrictEqualF
-  {
-    PreResult2 const & m_r;
-  public:
-    StrictEqualF(PreResult2 const & r) : m_r(r) {}
-    bool operator() (PreResult2 const & r) const;
-  };
-
-  /// To filter equal linear objects.
-  //@{
-  struct LessLinearTypesF
-  {
-    bool operator() (PreResult2 const & r1, PreResult2 const & r2) const;
-  };
-  class EqualLinearTypesF
-  {
-  public:
-    bool operator() (PreResult2 const & r1, PreResult2 const & r2) const;
-  };
-  //@}
-
-  string DebugPrint() const;
+  RankerResult(double lat, double lon);
 
   bool IsStreet() const;
 
-  inline FeatureID const & GetID() const { return m_id; }
-  inline string const & GetName() const { return m_str; }
-  inline feature::TypesHolder const & GetTypes() const { return m_types; }
+  search::RankingInfo const & GetRankingInfo() const { return m_info; }
 
-private:
-  template <class T> friend bool LessRankT(T const & r1, T const & r2);
-  template <class T> friend bool LessDistanceT(T const & r1, T const & r2);
+  template <typename TInfo>
+  inline void SetRankingInfo(TInfo && info)
+  {
+    m_info = forward<TInfo>(info);
+  }
 
-  bool IsEqualCommon(PreResult2 const & r) const;
+  FeatureID const & GetID() const { return m_id; }
+  string const & GetName() const { return m_str; }
+  feature::TypesHolder const & GetTypes() const { return m_types; }
+  Type const & GetResultType() const { return m_resultType; }
+  m2::PointD GetCenter() const { return m_region.m_point; }
+  double GetDistance() const { return m_distance; }
+  feature::EGeomType GetGeomType() const { return m_geomType; }
+  Result::Metadata GetMetadata() const { return m_metadata; }
 
-  string ReadableFeatureType(CategoriesHolder const * pCat,
-                             uint32_t type, int8_t locale) const;
+  double GetDistanceToPivot() const { return m_info.m_distanceToPivot; }
+  double GetLinearModelRank() const { return m_info.GetLinearModelRank(); }
 
-  FeatureID m_id;
-  feature::TypesHolder m_types;
+  bool GetCountryId(storage::CountryInfoGetter const & infoGetter, uint32_t ftype,
+                    storage::TCountryId & countryId) const;
+
+  bool IsEqualCommon(RankerResult const & r) const;
 
   uint32_t GetBestType(set<uint32_t> const * pPrefferedTypes = 0) const;
 
-  string m_str;
+private:
+  friend class RankerResultMaker;
 
   struct RegionInfo
   {
-    string m_file;
+    storage::TCountryId m_countryId;
     m2::PointD m_point;
 
-    inline void SetParams(string const & file, m2::PointD const & pt)
+    void SetParams(storage::TCountryId const & countryId, m2::PointD const & point)
     {
-      m_file = file;
-      m_point = pt;
+      m_countryId = countryId;
+      m_point = point;
     }
 
-    void GetRegion(storage::CountryInfoGetter const * pInfo,
-                   storage::CountryInfo & info) const;
-  } m_region;
+    bool GetCountryId(storage::CountryInfoGetter const & infoGetter,
+                      storage::TCountryId & countryId) const;
+  };
 
-  string GetRegionName(storage::CountryInfoGetter const * pInfo, uint32_t fType) const;
-
-  m2::PointD GetCenter() const { return m_region.m_point; }
-
+  RegionInfo m_region;
+  FeatureID m_id;
+  feature::TypesHolder m_types;
+  string m_str;
   double m_distance;
-  ResultType m_resultType;
-  uint8_t m_rank;
+  Type m_resultType;
+  RankingInfo m_info;
   feature::EGeomType m_geomType;
-
   Result::Metadata m_metadata;
 };
 
-inline string DebugPrint(PreResult2 const & t)
-{
-  return t.DebugPrint();
-}
-
-}  // namespace search::impl
-
 void ProcessMetadata(FeatureType const & ft, Result::Metadata & meta);
 
+string DebugPrint(RankerResult const & r);
 }  // namespace search

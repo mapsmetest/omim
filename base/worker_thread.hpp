@@ -1,113 +1,122 @@
 #pragma once
 
 #include "base/assert.hpp"
-#include "base/macros.hpp"
+#include "base/task_loop.hpp"
+#include "base/thread.hpp"
 #include "base/thread_checker.hpp"
 
-#include "std/condition_variable.hpp"
-#include "std/mutex.hpp"
-#include "std/queue.hpp"
-#include "std/shared_ptr.hpp"
-#include "std/thread.hpp"
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
+#include <queue>
+#include <utility>
+#include <vector>
 
-
-namespace my
+namespace base
 {
-/// This class wraps a sequential worker thread, that performs tasks
-/// one-by-one. This class is not thread-safe, so, it should be
-/// instantiated, used and destroyed on the same thread.
-template <typename Task>
-class WorkerThread
+// This class represents a simple worker thread with a queue of tasks.
+//
+// *NOTE* This class IS NOT thread-safe, it must be destroyed on the
+// same thread it was created, but Push* methods are thread-safe.
+class WorkerThread : public TaskLoop
 {
 public:
-  WorkerThread(int maxTasks)
-      : m_maxTasks(maxTasks), m_shouldFinish(false), m_workerThread(&WorkerThread::Worker, this)
-  {
-  }
+  using Clock = std::chrono::steady_clock;
+  using Duration = Clock::duration;
+  using TimePoint = Clock::time_point;
 
-  ~WorkerThread()
+  enum class Exit
   {
-    ASSERT(m_threadChecker.CalledOnOriginalThread(), ());
-    if (IsRunning())
-      RunUntilIdleAndStop();
-    ASSERT(!IsRunning(), ());
-  }
+    ExecPending,
+    SkipPending
+  };
 
-  /// Pushes new task into worker thread's queue. If the queue is
-  /// full, current thread is blocked.
-  ///
-  /// \param task A callable object that will be called by worker thread.
-  void Push(shared_ptr<Task> task)
-  {
-    ASSERT(m_threadChecker.CalledOnOriginalThread(), ());
-    ASSERT(IsRunning(), ());
-    unique_lock<mutex> lock(m_mutex);
-    m_condNotFull.wait(lock, [this]()
-                       {
-                         return m_tasks.size() < m_maxTasks;
-                       });
-    m_tasks.push(task);
-    m_condNonEmpty.notify_one();
-  }
+  explicit WorkerThread(size_t threadsCount = 1);
+  ~WorkerThread() override;
 
-  /// Runs worker thread until it'll become idle. After that,
-  /// terminates worker thread.
-  void RunUntilIdleAndStop()
-  {
-    ASSERT(m_threadChecker.CalledOnOriginalThread(), ());
-    ASSERT(IsRunning(), ());
-    {
-      lock_guard<mutex> lock(m_mutex);
-      m_shouldFinish = true;
-      m_condNonEmpty.notify_one();
-    }
-    m_workerThread.join();
-  }
+  // Pushes task to the end of the thread's queue of immediate tasks.
+  // Returns false when the thread is shut down.
+  //
+  // The task |t| is going to be executed after all immediate tasks
+  // that were pushed pushed before it.
+  bool Push(Task && t) override;
+  bool Push(Task const & t) override;
 
-  /// \return True if worker thread is running, false otherwise.
-  inline bool IsRunning() const
-  {
-    ASSERT(m_threadChecker.CalledOnOriginalThread(), ());
-    return m_workerThread.joinable();
-  }
+  // Pushes task to the thread's queue of delayed tasks. Returns false
+  // when the thread is shut down.
+  //
+  // The task |t| is going to be executed not earlier than after
+  // |delay|.  No other guarantees about execution order are made.  In
+  // particular, when executing:
+  //
+  // PushDelayed(3ms, task1);
+  // PushDelayed(1ms, task2);
+  //
+  // there is no guarantee that |task2| will be executed before |task1|.
+  //
+  // NOTE: current implementation depends on the fact that
+  // steady_clock is the same for different threads.
+  bool PushDelayed(Duration const & delay, Task && t);
+  bool PushDelayed(Duration const & delay, Task const & t);
+
+  // Sends a signal to the thread to shut down. Returns false when the
+  // thread was shut down previously.
+  bool Shutdown(Exit e);
+
+  // Sends a signal to the thread to shut down and waits for completion.
+  void ShutdownAndJoin();
+
+  static TimePoint Now() { return Clock::now(); }
 
 private:
-  void Worker()
+  enum QueueType
   {
-    shared_ptr<Task> task;
-    while (true)
+    QUEUE_TYPE_IMMEDIATE,
+    QUEUE_TYPE_DELAYED,
+    QUEUE_TYPE_COUNT
+  };
+
+  struct DelayedTask
+  {
+    template <typename T>
+    DelayedTask(TimePoint const & when, T && task) : m_when(when), m_task(std::forward<T>(task))
     {
-      {
-        unique_lock<mutex> lock(m_mutex);
-        m_condNonEmpty.wait(lock, [this]()
-                            {
-                              return m_shouldFinish || !m_tasks.empty();
-                            });
-        if (m_shouldFinish && m_tasks.empty())
-          break;
-        task = m_tasks.front();
-        m_tasks.pop();
-        m_condNotFull.notify_one();
-      }
-      (*task)();
     }
+
+    bool operator<(DelayedTask const & rhs) const { return m_when < rhs.m_when; }
+    bool operator>(DelayedTask const & rhs) const { return rhs < *this; }
+
+    TimePoint m_when = {};
+    Task m_task = {};
+  };
+
+  using ImmediateQueue = std::queue<Task>;
+  using DelayedQueue =
+      std::priority_queue<DelayedTask, std::vector<DelayedTask>, std::greater<DelayedTask>>;
+
+  template <typename Fn>
+  bool TouchQueues(Fn && fn)
+  {
+    std::lock_guard<std::mutex> lk(m_mu);
+    if (m_shutdown)
+      return false;
+    fn();
+    m_cv.notify_one();
+    return true;
   }
 
-  /// Maximum number of tasks in the queue.
-  int const m_maxTasks;
-  queue<shared_ptr<Task>> m_tasks;
+  void ProcessTasks();
 
-  /// When true, worker thread should finish all tasks in the queue
-  /// and terminate.
-  bool m_shouldFinish;
+  std::vector<threads::SimpleThread> m_threads;
+  std::mutex m_mu;
+  std::condition_variable m_cv;
 
-  mutex m_mutex;
-  condition_variable m_condNotFull;
-  condition_variable m_condNonEmpty;
-  thread m_workerThread;
-#ifdef DEBUG
-  ThreadChecker m_threadChecker;
-#endif
-  DISALLOW_COPY_AND_MOVE(WorkerThread);
-};  // class WorkerThread
-}  // namespace my
+  bool m_shutdown = false;
+  Exit m_exit = Exit::SkipPending;
+
+  ImmediateQueue m_immediate;
+  DelayedQueue m_delayed;
+
+  ThreadChecker m_checker;
+};
+}  // namespace base

@@ -1,12 +1,17 @@
 #include "indexer/feature_data.hpp"
-#include "indexer/feature_impl.hpp"
+
 #include "indexer/classificator.hpp"
 #include "indexer/feature.hpp"
+#include "indexer/feature_impl.hpp"
+#include "indexer/ftypes_matcher.hpp"
 
+#include "base/assert.hpp"
 #include "base/stl_add.hpp"
+#include "base/string_utils.hpp"
 
+#include "std/algorithm.hpp"
 #include "std/bind.hpp"
-
+#include "std/vector.hpp"
 
 using namespace feature;
 
@@ -14,33 +19,47 @@ using namespace feature;
 // TypesHolder implementation
 ////////////////////////////////////////////////////////////////////////////////////
 
+namespace feature
+{
+string DebugPrint(TypesHolder const & holder)
+{
+  Classificator const & c = classif();
+  string s;
+  for (uint32_t type : holder)
+    s += c.GetReadableObjectName(type) + " ";
+  if (!s.empty())
+    s.pop_back();
+  return s;
+}
+
 TypesHolder::TypesHolder(FeatureBase const & f)
 : m_size(0), m_geoType(f.GetFeatureType())
 {
   f.ForEachType([this](uint32_t type)
   {
-    this->operator()(type);
+    Add(type);
   });
 }
 
-string TypesHolder::DebugPrint() const
+void TypesHolder::Remove(uint32_t type)
 {
-  Classificator const & c = classif();
-
-  string s;
-  for (uint32_t t : *this)
-    s += c.GetFullObjectName(t) + "  ";
-  return s;
+  UNUSED_VALUE(RemoveIf(EqualFunctor<uint32_t>(type)));
 }
 
-void TypesHolder::Remove(uint32_t t)
+bool TypesHolder::Equals(TypesHolder const & other) const
 {
-  (void) RemoveIf(EqualFunctor<uint32_t>(t));
+  vector<uint32_t> my(this->begin(), this->end());
+  vector<uint32_t> his(other.begin(), other.end());
+
+  sort(::begin(my), ::end(my));
+  sort(::begin(his), ::end(his));
+
+  return my == his;
 }
+}  // namespace feature
 
 namespace
 {
-
 class UselessTypesChecker
 {
   vector<uint32_t> m_types;
@@ -64,8 +83,13 @@ public:
     // 1-arity
     char const * arr1[][1] = {
       { "building" },
+      { "building:part" },
       { "hwtag" },
+      { "psurface" },
       { "internet_access" },
+      { "wheelchair" },
+      { "sponsored" },
+      { "entrance" },
     };
 
     AddTypes(arr1);
@@ -73,7 +97,12 @@ public:
 
     // 2-arity
     char const * arr2[][2] = {
-      { "amenity", "atm" }
+      { "amenity", "atm" },
+      { "amenity", "bench" },
+      { "amenity", "shelter" },
+      { "amenity", "toilets" },
+      { "building", "address" },
+      { "building", "has_parts" },
     };
 
     AddTypes(arr2);
@@ -96,7 +125,43 @@ public:
     return false;
   }
 };
+}  // namespace
 
+namespace feature
+{
+uint8_t CalculateHeader(size_t const typesCount, uint8_t const headerGeomType,
+                        FeatureParamsBase const & params)
+{
+  ASSERT(typesCount != 0, ("Feature should have at least one type."));
+  uint8_t header = static_cast<uint8_t>(typesCount - 1);
+
+  if (!params.name.IsEmpty())
+    header |= HEADER_HAS_NAME;
+
+  if (params.layer != 0)
+    header |= HEADER_HAS_LAYER;
+
+  header |= headerGeomType;
+
+  // Geometry type for additional info is only one.
+  switch (headerGeomType)
+  {
+  case HEADER_GEOM_POINT:
+    if (params.rank != 0)
+      header |= HEADER_HAS_ADDINFO;
+    break;
+  case HEADER_GEOM_LINE:
+    if (!params.ref.empty())
+      header |= HEADER_HAS_ADDINFO;
+    break;
+  case HEADER_GEOM_AREA:
+  case HEADER_GEOM_POINT_EX:
+    if (!params.house.IsEmpty())
+      header |= HEADER_HAS_ADDINFO;
+    break;
+  }
+
+  return header;
 }
 
 void TypesHolder::SortBySpec()
@@ -108,6 +173,15 @@ void TypesHolder::SortBySpec()
   static UselessTypesChecker checker;
   (void) RemoveIfKeepValid(m_types, m_types + m_size, bind<bool>(cref(checker), _1));
 }
+
+vector<string> TypesHolder::ToObjectNames() const
+{
+  vector<string> result;
+  for (auto type : *this)
+    result.push_back(classif().GetReadableObjectName(type));
+  return result;
+}
+}  // namespace feature
 
 ////////////////////////////////////////////////////////////////////////////////////
 // FeatureParamsBase implementation
@@ -136,21 +210,23 @@ bool FeatureParamsBase::CheckValid() const
 
 string FeatureParamsBase::DebugString() const
 {
-  string utf8name;
-  name.GetString(StringUtf8Multilang::DEFAULT_CODE, utf8name);
-
+  string const utf8name = DebugPrint(name);
   return ((!utf8name.empty() ? "Name:" + utf8name : "") +
-          (" Layer:" + DebugPrint(layer)) +
           (rank != 0 ? " Rank:" + DebugPrint(rank) : "") +
           (!house.IsEmpty() ? " House:" + house.Get() : "") +
           (!ref.empty() ? " Ref:" + ref : ""));
+}
+
+bool FeatureParamsBase::IsEmptyNames() const
+{
+  return name.IsEmpty() && house.IsEmpty() && ref.empty();
 }
 
 namespace
 {
 
 // Most used dummy values are taken from
-// http://taginfo.openstreetmap.org/keys/addr%3Ahousename#values
+// https://taginfo.openstreetmap.org/keys/addr%3Ahousename#values
 bool IsDummyName(string const & s)
 {
   return (s.empty() ||
@@ -159,11 +235,15 @@ bool IsDummyName(string const & s)
           s == "Edificio" || s == "edificio");
 }
 
-struct IsBadChar
-{
-  bool operator() (char c) const { return (c == '\n'); }
-};
+}
 
+/////////////////////////////////////////////////////////////////////////////////////////
+// FeatureParams implementation
+/////////////////////////////////////////////////////////////////////////////////////////
+
+void FeatureParams::ClearName()
+{
+  name.Clear();
 }
 
 bool FeatureParams::AddName(string const & lang, string const & s)
@@ -178,70 +258,125 @@ bool FeatureParams::AddName(string const & lang, string const & s)
 
 bool FeatureParams::AddHouseName(string const & s)
 {
-  if (IsDummyName(s) || name.FindString(s) != StringUtf8Multilang::UNSUPPORTED_LANGUAGE_CODE)
+  if (IsDummyName(s) || name.FindString(s) != StringUtf8Multilang::kUnsupportedLanguageCode)
     return false;
 
   // Most names are house numbers by statistics.
   if (house.IsEmpty() && AddHouseNumber(s))
     return true;
 
+  // If we got a clear number, replace the house number with it.
+  // Example: housename=16th Street, housenumber=34
+  if (strings::is_number(s))
+  {
+    string housename(house.Get());
+    if (AddHouseNumber(s))
+    {
+      // Duplicating code to avoid changing the method header.
+      string dummy;
+      if (!name.GetString(StringUtf8Multilang::kDefaultCode, dummy))
+        name.AddString(StringUtf8Multilang::kDefaultCode, housename);
+      return true;
+    }
+  }
+
   // Add as a default name if we don't have it yet.
   string dummy;
-  if (!name.GetString(StringUtf8Multilang::DEFAULT_CODE, dummy))
+  if (!name.GetString(StringUtf8Multilang::kDefaultCode, dummy))
   {
-    name.AddString(StringUtf8Multilang::DEFAULT_CODE, s);
+    name.AddString(StringUtf8Multilang::kDefaultCode, s);
     return true;
   }
 
   return false;
 }
 
-
-bool FeatureParams::AddHouseNumber(string const & ss)
+bool FeatureParams::AddHouseNumber(string houseNumber)
 {
-  if (!feature::IsHouseNumber(ss))
+  ASSERT(!houseNumber.empty(), ("This check should be done by the caller."));
+  ASSERT_NOT_EQUAL(houseNumber.front(), ' ', ("Trim should be done by the caller."));
+
+  // Negative house numbers are not supported.
+  if (houseNumber.front() == '-' || houseNumber.find(u8"－") == 0)
     return false;
 
-  // Remove trailing zero's from house numbers.
-  // It's important for debug checks of serialized-deserialized feature.
-  string s(ss);
-  uint64_t n;
-  if (strings::to_uint64(s, n))
-    s = strings::to_string(n);
+  // Replace full-width digits, mostly in Japan, by ascii-ones.
+  strings::NormalizeDigits(houseNumber);
 
-  house.Set(s);
-  return true;
+  // Remove leading zeroes from house numbers.
+  // It's important for debug checks of serialized-deserialized feature.
+  size_t i = 0;
+  while (i + 1 < houseNumber.size() && houseNumber[i] == '0')
+    ++i;
+  houseNumber.erase(0, i);
+
+  if (any_of(houseNumber.cbegin(), houseNumber.cend(), IsDigit))
+  {
+    house.Set(houseNumber);
+    return true;
+  }
+  return false;
 }
 
-void FeatureParams::AddStreetAddress(string const & s)
+void FeatureParams::AddStreet(string s)
 {
-  m_street = s;
+  // Replace \n with spaces because we write addresses to txt file.
+  replace(s.begin(), s.end(), '\n', ' ');
 
-  // Erase bad chars (\n) because we write addresses to txt file.
-  m_street.erase(remove_if(m_street.begin(), m_street.end(), IsBadChar()), m_street.end());
+  m_addrTags.Add(AddressData::STREET, s);
+}
 
-  // Osm likes to put house numbers into addr:street field.
-  size_t i = m_street.find_last_of("\t ");
+void FeatureParams::AddAddress(string const & s)
+{
+  size_t i = s.find_first_of("\t ");
   if (i != string::npos)
   {
-    ++i;
-    uint64_t n;
-    if (strings::to_uint64(m_street.substr(i), n))
-      m_street.erase(i);
+    string const house = s.substr(0, i);
+    if (feature::IsHouseNumber(house))
+    {
+      AddHouseNumber(house);
+      i = s.find_first_not_of("\t ", i);
+    }
+    else
+    {
+      i = 0;
+    }
   }
+  else
+  {
+    i = 0;
+  }
+
+  AddStreet(s.substr(i));
+}
+
+void FeatureParams::AddPlace(string const & s)
+{
+  m_addrTags.Add(AddressData::PLACE, s);
+}
+
+void FeatureParams::AddPostcode(string const & s)
+{
+  m_addrTags.Add(AddressData::POSTCODE, s);
 }
 
 bool FeatureParams::FormatFullAddress(m2::PointD const & pt, string & res) const
 {
-  if (!m_street.empty() && !house.IsEmpty())
+  string const street = GetStreet();
+  if (!street.empty() && !house.IsEmpty())
   {
-    res = m_street + "|" + house.Get() + "|"
+    res = street + "|" + house.Get() + "|"
         + strings::to_string_dac(MercatorBounds::YToLat(pt.y), 8) + "|"
         + strings::to_string_dac(MercatorBounds::XToLon(pt.x), 8) + '\n';
     return true;
   }
 
   return false;
+}
+
+string FeatureParams::GetStreet() const
+{
+  return m_addrTags.Get(AddressData::STREET);
 }
 
 void FeatureParams::SetGeomType(feature::EGeomType t)
@@ -355,10 +490,21 @@ bool FeatureParams::FinishAddingTypes()
     newTypes.push_back(candidate);
   }
 
+  // Remove duplicated types.
+  sort(newTypes.begin(), newTypes.end());
+  newTypes.erase(unique(newTypes.begin(), newTypes.end()), newTypes.end());
+
   m_Types.swap(newTypes);
 
-  if (m_Types.size() > max_types_count)
-    m_Types.resize(max_types_count);
+  if (m_Types.size() > kMaxTypesCount)
+    m_Types.resize(kMaxTypesCount);
+
+  // Patch fix that removes house number from localities.
+  if (!house.IsEmpty() && ftypes::IsLocalityChecker::Instance()(m_Types))
+  {
+    LOG(LINFO, ("Locality with house number", *this));
+    house.Clear();
+  }
 
   return !m_Types.empty();
 }
@@ -402,7 +548,7 @@ uint32_t FeatureParams::FindType(uint32_t comp, uint8_t level) const
 
 bool FeatureParams::CheckValid() const
 {
-  CHECK(!m_Types.empty() && m_Types.size() <= max_types_count, ());
+  CHECK(!m_Types.empty() && m_Types.size() <= kMaxTypesCount, ());
   CHECK_NOT_EQUAL(m_geomType, 0xFF, ());
 
   return FeatureParamsBase::CheckValid();
@@ -410,28 +556,7 @@ bool FeatureParams::CheckValid() const
 
 uint8_t FeatureParams::GetHeader() const
 {
-  uint8_t header = static_cast<uint8_t>(m_Types.size() - 1);
-
-  if (!name.IsEmpty())
-    header |= HEADER_HAS_NAME;
-
-  if (layer != 0)
-    header |= HEADER_HAS_LAYER;
-
-  uint8_t const typeMask = GetTypeMask();
-  header |= typeMask;
-
-  // Geometry type for additional info is only one.
-  switch (GetTypeMask())
-  {
-  case HEADER_GEOM_POINT: if (rank != 0) header |= HEADER_HAS_ADDINFO; break;
-  case HEADER_GEOM_LINE: if (!ref.empty()) header |= HEADER_HAS_ADDINFO; break;
-  case HEADER_GEOM_AREA:
-  case HEADER_GEOM_POINT_EX:
-    if (!house.IsEmpty()) header |= HEADER_HAS_ADDINFO; break;
-  }
-
-  return header;
+  return CalculateHeader(m_Types.size(), GetTypeMask(), *this);
 }
 
 uint32_t FeatureParams::GetIndexForType(uint32_t t)
@@ -448,9 +573,9 @@ string DebugPrint(FeatureParams const & p)
 {
   Classificator const & c = classif();
 
-  string res = "Types";
+  string res = "Types: ";
   for (size_t i = 0; i < p.m_Types.size(); ++i)
-    res += (" : " + c.GetReadableObjectName(p.m_Types[i]));
+    res = res + c.GetReadableObjectName(p.m_Types[i]) + "; ";
 
   return (res + p.DebugString());
 }

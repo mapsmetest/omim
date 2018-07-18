@@ -1,14 +1,1 @@
-<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<svg width="23px" height="23px" viewBox="0 0 23 23" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:sketch="http://www.bohemiancoding.com/sketch/ns">
-    <!-- Generator: Sketch 3.3.3 (12072) - http://www.bohemiancoding.com/sketch -->
-    <title>atm-m</title>
-    <desc>Created with Sketch.</desc>
-    <defs></defs>
-    <g id="POI" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" sketch:type="MSPage">
-        <g id="atm-m-copy" sketch:type="MSLayerGroup">
-            <ellipse id="Oval-1-Copy-41" opacity="0" fill="#FFFFFF" sketch:type="MSShapeGroup" cx="11.5" cy="11.5" rx="11.5" ry="11.5"></ellipse>
-            <ellipse id="Oval-1-Copy-40" fill="#3D3D37" sketch:type="MSShapeGroup" cx="11.5" cy="11.5" rx="10.5" ry="10.5"></ellipse>
-            <path d="M5.72222,8 C5.32211,8 5,8.3221 5,8.7223 L5,15.2778 C5,15.6779 5.32211,16 5.72222,16 L17.27778,16 C17.67789,16 18,15.6779 18,15.2778 L18,8.7223 C18,8.3221 17.67789,8 17.27778,8 L5.72222,8 Z M5.5,9.5 L17.5,9.5 L17.5,11 L5.5,11 L5.5,9.5 Z M6,13.5 L8,13.5 L8,15 L6,15 L6,13.5 Z M12,14.2777 L17,14.2777 L17,15 L12,15 L12,14.2777 Z" id="rect10401-9-copy" opacity="0.41" fill="#FFFFFF" sketch:type="MSShapeGroup"></path>
-        </g>
-    </g>
-</svg>
+<svg height="24" viewBox="0 0 24 24" width="24"><g fill="none" fill-rule="evenodd"><circle cx="12" cy="12" fill="#fff" opacity=".4" r="12"/><circle cx="12" cy="12" fill="#3d3d36" r="11"/><path d="m14.7233998 14.009025c.1613847.1329202.3709535.2131972.6.2131972.5099796 0 .9233998-.3979691.9233998-.8888889 0-.4909197-.4134202-.8888889-.9233998-.8888889-.2290465 0-.4386153.080277-.6.2131973-.1613847-.1329203-.3709535-.2131973-.6-.2131973-.5099796 0-.9233998.3979692-.9233998.8888889 0 .4909198.4134202.8888889.9233998.8888889.2290465 0 .4386153-.080277.6-.2131972zm1.781055 1.990975-9.00890959-.0000001c-.81599075 0-1.49554521-.6686146-1.49554521-1.4933925v-3.3954963h12v3.3954964c0 .8136135-.6695784 1.4933925-1.4955452 1.4933925zm-9.39703292-8h9.78515622c.6070746 0 1.1074219.49746139 1.1074219 1.11111111v1.11111109h-12v-1.11111109c0-.61792797.49580966-1.11111111 1.10742188-1.11111111zm.2771935 5.3333333v.8888889h1.84615385v-.8888889z" fill="#fff" opacity=".6"/></g></svg>

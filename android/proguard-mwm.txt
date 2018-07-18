@@ -1,29 +1,36 @@
 # obfuscate supportV7 menu subclasses. it fixes bug with some Samsung and other devices ROMS based on android 4.2.2.
 # more details here : https://code.google.com/p/android/issues/detail?id=78377
 -keep class !android.support.v7.internal.view.menu.**,** {*;}
+# support library bug
+-dontwarn android.support.**
 
 # flurry
 -dontwarn com.flurry.**
-
-# support library bug
--dontwarn android.support.**
 
 # parse
 -dontwarn com.squareup.okhttp.**
 -dontwarn okio.**
 -dontwarn com.facebook.**
 
+# pushwoosh
+-keep class com.pushwoosh.** { *; }
+-keep class com.arellomobile.** { *; }
+-dontwarn com.pushwoosh.**
+-dontwarn com.arellomobile.**
+
+# appsFlyer
+-keep class com.appsflyer.** { *; }
+-dontwarn com.appsflyer.**
+
+# myTarget
+# Remove this dontwarn when MyTarget is updated to 4.6.15
+-dontwarn com.my.target.nativeads.mediation.**
+# Remove this dontwarn when MyTarget is updated to 4.6.16
+-dontwarn com.my.target.core.net.cookie.**
+-dontwarn com.mopub.**
+
 -dontoptimize
 -keepattributes **
-
-# log proguard info
-#
-#-verbose
-#
-#-printseeds seeds.txt
-#-printusage unused.txt
-#-printmapping mapping.txt
-
 
 # Gson support
 -keep class com.mapswithme.util.Gsonable

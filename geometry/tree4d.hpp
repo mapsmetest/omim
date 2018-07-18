@@ -7,6 +7,7 @@
 #include "base/logging.hpp"
 
 #include "std/sstream.hpp"
+#include "std/vector.hpp"
 
 #include "3party/kdtree++/kdtree.hpp"
 
@@ -220,23 +221,37 @@ namespace m4
     }
 
     template <class ToDo>
-    void ForEach(ToDo toDo) const
+    void ForEach(ToDo && toDo) const
     {
       for (ValueT const & v : m_tree)
         toDo(v.m_val);
     }
-
     template <class ToDo>
-    void ForEachWithRect(ToDo toDo) const
+    void ForEachEx(ToDo && toDo) const
     {
       for (ValueT const & v : m_tree)
         toDo(v.GetRect(), v.m_val);
     }
 
     template <class ToDo>
-    void ForEachInRect(m2::RectD const & rect, ToDo toDo) const
+    bool FindNode(ToDo && toDo) const
+    {
+      for (ValueT const & v : m_tree)
+        if (toDo(v.m_val))
+          return true;
+
+      return false;
+    }
+
+    template <class ToDo>
+    void ForEachInRect(m2::RectD const & rect, ToDo && toDo) const
     {
       m_tree.for_each(GetFunctor(rect, [&toDo] (ValueT const & v) { toDo(v.m_val); }));
+    }
+    template <class ToDo>
+    void ForEachInRectEx(m2::RectD const & rect, ToDo && toDo) const
+    {
+      m_tree.for_each(GetFunctor(rect, [&toDo] (ValueT const & v) { toDo(v.GetRect(), v.m_val); }));
     }
 
     bool IsEmpty() const { return m_tree.empty(); }

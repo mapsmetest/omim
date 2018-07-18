@@ -1,123 +1,175 @@
-#import "Common.h"
-#import "MWMCircularProgress.h"
-#import "MWMNavigationDashboardEntity.h"
 #import "MWMRoutePreview.h"
-#import "TimeUtils.h"
-#import "UIColor+MapsMeColor.h"
+#import "MWMCircularProgress.h"
+#import "MWMCommon.h"
+#import "MWMLocationManager.h"
+#import "MWMNavigationDashboardEntity.h"
+#import "MWMNavigationDashboardManager.h"
+#import "MWMRouter.h"
+#import "MWMTaxiPreviewDataSource.h"
+#import "Statistics.h"
+#import "SwiftBridge.h"
+#import "UIButton+Orientation.h"
+#import "UIImageView+Coloring.h"
 
-@interface MWMRoutePreview () <MWMCircularProgressDelegate>
+#include "platform/platform.hpp"
 
-@property (nonatomic) CGFloat goButtonHiddenOffset;
-@property (weak, nonatomic) IBOutlet NSLayoutConstraint * goButtonVerticalOffset;
-@property (weak, nonatomic) IBOutlet UIView * statusBox;
-@property (weak, nonatomic) IBOutlet UIView * completeBox;
-@property (weak, nonatomic) IBOutlet NSLayoutConstraint * goButtonHeight;
-@property (weak, nonatomic) IBOutlet UIView * progress;
-@property (weak, nonatomic) IBOutlet UIView * progressIndicator;
-@property (nonatomic) BOOL showGoButton;
-@property (nonatomic) MWMCircularProgress * progressManager;
+@interface MWMRoutePreview ()<MWMCircularProgressProtocol>
+
+@property(nonatomic) BOOL isVisible;
+@property(weak, nonatomic) IBOutlet UIButton * backButton;
+@property(weak, nonatomic) IBOutlet UIView * bicycle;
+@property(weak, nonatomic) IBOutlet UIView * contentView;
+@property(weak, nonatomic) IBOutlet UIView * pedestrian;
+@property(weak, nonatomic) IBOutlet UIView * publicTransport;
+@property(weak, nonatomic) IBOutlet UIView * taxi;
+@property(weak, nonatomic) IBOutlet UIView * vehicle;
 
 @end
 
 @implementation MWMRoutePreview
+{
+  map<MWMRouterType, MWMCircularProgress *> m_progresses;
+}
 
 - (void)awakeFromNib
 {
   [super awakeFromNib];
-  self.goButtonHiddenOffset = self.goButtonVerticalOffset.constant;
+  self.translatesAutoresizingMaskIntoConstraints = NO;
+  [self setupProgresses];
+  [self.backButton matchInterfaceOrientation];
 }
 
-- (void)configureWithEntity:(MWMNavigationDashboardEntity *)entity
+- (void)setupProgresses
 {
-  self.timeLabel.text = [NSDateFormatter estimatedArrivalTimeWithSeconds:@(entity.timeToTarget)];
-  self.distanceLabel.text = [NSString stringWithFormat:@"%@ %@", entity.targetDistance, entity.targetUnits];
-  NSString * arriveStr = [NSDateFormatter localizedStringFromDate:[[NSDate date]
-                                           dateByAddingTimeInterval:entity.timeToTarget]
-                                                          dateStyle:NSDateFormatterNoStyle
-                                                          timeStyle:NSDateFormatterShortStyle];
-  self.arrivalsLabel.text = [NSString stringWithFormat:@"%@ %@", L(@"routing_arrive"), arriveStr];
+  [self addProgress:self.vehicle imageName:@"ic_car" routerType:MWMRouterTypeVehicle];
+  [self addProgress:self.pedestrian imageName:@"ic_pedestrian" routerType:MWMRouterTypePedestrian];
+  [self addProgress:self.publicTransport
+          imageName:@"ic_train"
+         routerType:MWMRouterTypePublicTransport];
+  [self addProgress:self.bicycle imageName:@"ic_bike" routerType:MWMRouterTypeBicycle];
+  [self addProgress:self.taxi imageName:@"ic_taxi" routerType:MWMRouterTypeTaxi];
 }
 
-- (void)remove
+- (void)addProgress:(UIView *)parentView
+          imageName:(NSString *)imageName
+         routerType:(MWMRouterType)routerType
 {
-  [super remove];
-  self.pedestrian.enabled = YES;
-  self.vehicle.enabled = YES;
+  MWMCircularProgress * progress = [[MWMCircularProgress alloc] initWithParentView:parentView];
+  MWMCircularProgressStateVec const imageStates = {MWMCircularProgressStateNormal,
+    MWMCircularProgressStateProgress, MWMCircularProgressStateSpinner};
+
+  [progress setImageName:imageName forStates:imageStates];
+  [progress setImageName:[imageName stringByAppendingString:@"_selected"] forStates:{MWMCircularProgressStateSelected, MWMCircularProgressStateCompleted}];
+  [progress setImageName:@"ic_error" forStates:{MWMCircularProgressStateFailed}];
+
+  [progress setColoring:MWMButtonColoringWhiteText
+              forStates:{MWMCircularProgressStateFailed, MWMCircularProgressStateSelected,
+                         MWMCircularProgressStateProgress, MWMCircularProgressStateSpinner,
+                         MWMCircularProgressStateCompleted}];
+
+  [progress setSpinnerBackgroundColor:UIColor.clearColor];
+  [progress setColor:UIColor.whiteColor
+           forStates:{MWMCircularProgressStateProgress, MWMCircularProgressStateSpinner}];
+
+  progress.delegate = self;
+  m_progresses[routerType] = progress;
 }
 
-- (void)statePlaning
+- (void)statePrepare
 {
-  self.showGoButton = NO;
-  self.statusBox.hidden = NO;
-  self.completeBox.hidden = YES;
-  [self.progressManager reset];
-  self.progress.hidden = NO;
-  self.cancelButton.hidden = YES;
-  self.status.text = L(@"routing_planning");
-  self.status.textColor = UIColor.blackHintText;
+  for (auto const & progress : m_progresses)
+    progress.second.state = MWMCircularProgressStateNormal;
+
+  if (!MWMLocationManager.lastLocation || !Platform::IsConnected())
+    [self.taxi removeFromSuperview];
 }
 
-- (void)stateError
+- (void)selectRouter:(MWMRouterType)routerType
 {
-  self.progress.hidden = YES;
-  self.cancelButton.hidden = NO;
-  self.status.text = L(@"routing_planning_error");
-  self.status.textColor = UIColor.red;
+  for (auto const & progress : m_progresses)
+    progress.second.state = MWMCircularProgressStateNormal;
+  m_progresses[routerType].state = MWMCircularProgressStateSelected;
 }
 
-- (void)showGoButtonAnimated:(BOOL)show
+- (void)router:(MWMRouterType)routerType setState:(MWMCircularProgressState)state
 {
-  [self layoutIfNeeded];
-  self.showGoButton = show;
-  [UIView animateWithDuration:kDefaultAnimationDuration animations:^{ [self layoutIfNeeded]; }];
+  m_progresses[routerType].state = state;
+}
+
+- (void)router:(MWMRouterType)routerType setProgress:(CGFloat)progress
+{
+  m_progresses[routerType].progress = progress;
+}
+
+#pragma mark - MWMCircularProgressProtocol
+
+- (void)progressButtonPressed:(nonnull MWMCircularProgress *)progress
+{
+  [Statistics logEvent:kStatEventName(kStatNavigationDashboard, kStatButton)
+        withParameters:@{kStatValue : kStatProgress}];
+  MWMCircularProgressState const s = progress.state;
+  if (s == MWMCircularProgressStateSelected || s == MWMCircularProgressStateCompleted)
+    return;
+
+  for (auto const & prg : m_progresses)
+  {
+    if (prg.second != progress)
+      continue;
+    auto const routerType = prg.first;
+    [self selectRouter:routerType];
+    [MWMRouter setType:routerType];
+    [MWMRouter rebuildWithBestRouter:NO];
+    NSString * routerTypeString = nil;
+    switch (routerType)
+    {
+    case MWMRouterTypeVehicle: routerTypeString = kStatVehicle; break;
+    case MWMRouterTypePedestrian: routerTypeString = kStatPedestrian; break;
+    case MWMRouterTypePublicTransport: routerTypeString = kStatPublicTransport; break;
+    case MWMRouterTypeBicycle: routerTypeString = kStatBicycle; break;
+    case MWMRouterTypeTaxi: routerTypeString = kStatTaxi; break;
+    }
+    [Statistics logEvent:kStatPointToPoint
+          withParameters:@{kStatAction : kStatChangeRoutingMode, kStatValue : routerTypeString}];
+  }
+}
+
+- (void)addToView:(UIView *)superview
+{
+  NSAssert(superview != nil, @"Superview can't be nil");
+  if ([superview.subviews containsObject:self])
+    return;
+  [superview addSubview:self];
+  [self setupConstraints];
+  dispatch_async(dispatch_get_main_queue(), ^{
+    self.isVisible = YES;
+  });
+}
+
+- (void)remove { self.isVisible = NO; }
+
+- (void)setupConstraints {}
+
+- (void)layoutSubviews
+{
+  [super layoutSubviews];
+  [self.vehicle setNeedsLayout];
 }
 
 #pragma mark - Properties
 
-- (CGRect)defaultFrame
+- (void)setIsVisible:(BOOL)isVisible
 {
-  CGRect frame = super.defaultFrame;
-  if (IPAD)
-    frame.size.width -= frame.origin.x;
-  return frame;
-}
-
-- (void)setShowGoButton:(BOOL)showGoButton
-{
-  _showGoButton = showGoButton;
-  self.goButtonVerticalOffset.constant = showGoButton ? 0.0 : self.goButtonHiddenOffset;
-  self.statusBox.hidden = YES;
-  self.completeBox.hidden = NO;
-  self.progress.hidden = YES;
-  self.cancelButton.hidden = NO;
-}
-
-- (CGFloat)visibleHeight
-{
-  CGFloat height = super.visibleHeight;
-  if (self.showGoButton)
-    height += self.goButtonHeight.constant;
-  return height;
-}
-
-- (void)setRouteBuildingProgress:(CGFloat)progress
-{
-  dispatch_async(dispatch_get_main_queue(), ^
-  {
-    self.progressManager.progress = progress / 100.;
-  });
-}
-
-- (MWMCircularProgress *)progressManager
-{
-  if (!_progressManager)
-    _progressManager = [[MWMCircularProgress alloc] initWithParentView:self.progressIndicator delegate:self];
-  return _progressManager;
-}
-
-- (void)progressButtonPressed:(nonnull MWMCircularProgress *)progress
-{
-  [self.cancelButton sendActionsForControlEvents:UIControlEventTouchUpInside];
+  _isVisible = isVisible;
+  auto sv = self.superview;
+  [sv setNeedsLayout];
+  [UIView animateWithDuration:kDefaultAnimationDuration
+      animations:^{
+        [sv layoutIfNeeded];
+      }
+      completion:^(BOOL finished) {
+        if (!self.isVisible)
+          [self removeFromSuperview];
+      }];
 }
 
 @end

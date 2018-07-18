@@ -1,63 +1,111 @@
 #pragma once
 
-#include "drape_frontend/tile_key.hpp"
+#include "drape_frontend/animation/opacity_animation.hpp"
+#include "drape_frontend/animation/value_mapping.hpp"
+#include "drape_frontend/frame_values.hpp"
+#include "drape_frontend/render_state.hpp"
+#include "drape_frontend/tile_utils.hpp"
+
+#include "shaders/program_params.hpp"
 
 #include "drape/pointers.hpp"
-#include "drape/glstate.hpp"
 #include "drape/render_bucket.hpp"
 
-#include "std/vector.hpp"
-#include "std/set.hpp"
+#include <memory>
+#include <vector>
+#include <string>
 
 class ScreenBase;
 namespace dp { class OverlayTree; }
+namespace gpu { class ProgramManager; }
 
 namespace df
 {
-
-class RenderGroup
+class BaseRenderGroup
 {
 public:
-  RenderGroup(dp::GLState const & state, TileKey const & tileKey);
-  ~RenderGroup();
+  BaseRenderGroup(dp::GLState const & state, TileKey const & tileKey)
+    : m_state(state)
+    , m_tileKey(tileKey)
+  {}
 
-  void Update(ScreenBase const & modelView);
-  void CollectOverlay(dp::RefPointer<dp::OverlayTree> tree);
-  void Render(ScreenBase const & screen);
-
-  void PrepareForAdd(size_t countForAdd);
-  void AddBucket(dp::TransferPointer<dp::RenderBucket> bucket);
+  virtual ~BaseRenderGroup() = default;
 
   dp::GLState const & GetState() const { return m_state; }
   TileKey const & GetTileKey() const { return m_tileKey; }
 
+  virtual void UpdateAnimation();
+  virtual void Render(ScreenBase const & screen, ref_ptr<gpu::ProgramManager> mng,
+                      FrameValues const & frameValues) = 0;
+
+protected:
+  dp::GLState m_state;
+  gpu::MapProgramParams m_params;
+
+private:
+  TileKey m_tileKey;
+};
+
+class RenderGroup : public BaseRenderGroup
+{
+  using TBase = BaseRenderGroup;
+  friend class BatchMergeHelper;
+public:
+  RenderGroup(dp::GLState const & state, TileKey const & tileKey);
+  ~RenderGroup() override;
+
+  void Update(ScreenBase const & modelView);
+  void CollectOverlay(ref_ptr<dp::OverlayTree> tree);
+  bool HasOverlayHandles() const;
+  void RemoveOverlay(ref_ptr<dp::OverlayTree> tree);
+  void SetOverlayVisibility(bool isVisible);
+  void Render(ScreenBase const & screen, ref_ptr<gpu::ProgramManager> mng,
+              FrameValues const & frameValues) override;
+
+  void AddBucket(drape_ptr<dp::RenderBucket> && bucket);
+
   bool IsEmpty() const { return m_renderBuckets.empty(); }
+
   void DeleteLater() const { m_pendingOnDelete = true; }
   bool IsPendingOnDelete() const { return m_pendingOnDelete; }
+  bool CanBeDeleted() const { return m_canBeDeleted; }
 
-  bool IsLess(RenderGroup const & other) const;
+  bool UpdateCanBeDeletedStatus(bool canBeDeleted, int currentZoom,
+                                ref_ptr<dp::OverlayTree> tree);
+
+  bool IsOverlay() const;
+  bool IsUserMark() const;
 
 private:
-  dp::GLState m_state;
-  TileKey m_tileKey;
-  vector<dp::MasterPointer<dp::RenderBucket> > m_renderBuckets;
-
+  std::vector<drape_ptr<dp::RenderBucket>> m_renderBuckets;
   mutable bool m_pendingOnDelete;
+  mutable bool m_canBeDeleted;
+
+private:
+  friend std::string DebugPrint(RenderGroup const & group);
 };
 
-class RenderBucketComparator
+class RenderGroupComparator
 {
 public:
-  RenderBucketComparator(set<TileKey> const & activeTiles);
-
-  void ResetInternalState();
-
-  bool operator()(RenderGroup const * l, RenderGroup const * r);
-
-private:
-  set<TileKey> const & m_activeTiles;
-  bool m_needGroupMergeOperation;
-  bool m_needBucketsMergeOperation;
+  bool operator()(drape_ptr<RenderGroup> const & l, drape_ptr<RenderGroup> const & r);
+  bool m_pendingOnDeleteFound = false;
 };
 
-} // namespace df
+class UserMarkRenderGroup : public RenderGroup
+{
+  using TBase = RenderGroup;
+
+public:
+  UserMarkRenderGroup(dp::GLState const & state, TileKey const & tileKey);
+  ~UserMarkRenderGroup() override {}
+
+  void UpdateAnimation() override;
+
+  bool IsUserPoint() const;
+
+private:
+  std::unique_ptr<OpacityAnimation> m_animation;
+  ValueMapping<float> m_mapping;
+};
+}  // namespace df

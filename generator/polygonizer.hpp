@@ -3,6 +3,7 @@
 #include "generator/borders_loader.hpp"
 #include "generator/feature_builder.hpp"
 #include "generator/generate_info.hpp"
+#include "generator/osm_source.hpp"
 
 #include "indexer/feature_visibility.hpp"
 #include "indexer/cell_id.hpp"
@@ -15,8 +16,7 @@
 #include "base/buffer_vector.hpp"
 #include "base/macros.hpp"
 
-#include "std/string.hpp"
-
+#include <string>
 
 #ifndef PARALLEL_POLYGONIZER
 #define PARALLEL_POLYGONIZER 1
@@ -29,7 +29,6 @@
 #include <QtCore/QMutexLocker>
 #endif
 
-
 namespace feature
 {
   // Groups features according to country polygons
@@ -39,7 +38,7 @@ namespace feature
     feature::GenerateInfo const & m_info;
 
     vector<FeatureOutT*> m_Buckets;
-    vector<string> m_Names;
+    vector<std::string> m_Names;
     borders::CountriesContainerT m_countries;
 
 #if PARALLEL_POLYGONIZER
@@ -49,9 +48,10 @@ namespace feature
 #endif
 
   public:
-    explicit Polygonizer(feature::GenerateInfo const & info) : m_info(info)
+    Polygonizer(feature::GenerateInfo const & info)
+      : m_info(info)
 #if PARALLEL_POLYGONIZER
-    , m_ThreadPoolSemaphore(m_ThreadPool.maxThreadCount() * 8)
+      , m_ThreadPoolSemaphore(m_ThreadPool.maxThreadCount() * 8)
 #endif
     {
 #if PARALLEL_POLYGONIZER
@@ -86,7 +86,8 @@ namespace feature
 
       bool operator()(m2::PointD const & pt)
       {
-        m_regions.ForEachInRect(m2::RectD(pt, pt), bind<void>(ref(*this), _1, cref(pt)));
+        m_regions.ForEachInRect(m2::RectD(pt, pt),
+                                std::bind<void>(std::ref(*this), std::placeholders::_1, std::cref(pt)));
         return !m_belongs;
       }
 
@@ -110,7 +111,7 @@ namespace feature
       }
     };
 
-    void operator () (FeatureBuilder1 const & fb)
+    void operator()(FeatureBuilder1 & fb)
     {
       buffer_vector<borders::CountryPolygons const *, 32> vec;
       m_countries.ForEachInRect(fb.GetLimitRect(), InsertCountriesPtr(vec));
@@ -119,20 +120,25 @@ namespace feature
       {
       case 0:
         break;
-      case 1:
-        EmitFeature(vec[0], fb);
-        break;
+      case 1: EmitFeature(vec[0], fb); break;
       default:
         {
 #if PARALLEL_POLYGONIZER
           m_ThreadPoolSemaphore.acquire();
           m_ThreadPool.start(new PolygonizerTask(this, vec, fb));
 #else
-          PolygonizerTask task(this, vec, fb);
-          task.RunBase();
+        PolygonizerTask task(this, vec, fb);
+        task.RunBase();
 #endif
         }
       }
+    }
+
+    std::string m_currentNames;
+
+    void Start()
+    {
+      m_currentNames.clear();
     }
 
     void Finish()
@@ -155,10 +161,15 @@ namespace feature
         country->m_index = static_cast<int>(m_Buckets.size())-1;
       }
 
-      (*(m_Buckets[country->m_index]))(fb);
+      if (!m_currentNames.empty())
+        m_currentNames += ';';
+      m_currentNames += country->m_name;
+
+      auto & bucket = *(m_Buckets[country->m_index]);
+      bucket(fb);
     }
 
-    vector<string> const & Names() const
+    vector<std::string> const & Names() const
     {
       return m_Names;
     }
@@ -175,17 +186,19 @@ namespace feature
       PolygonizerTask(Polygonizer * pPolygonizer,
                       buffer_vector<borders::CountryPolygons const *, 32> const & countries,
                       FeatureBuilder1 const & fb)
-        : m_pPolygonizer(pPolygonizer), m_Countries(countries), m_FB(fb) {}
+        : m_pPolygonizer(pPolygonizer), m_Countries(countries), m_fb(fb)
+      {
+      }
 
       void RunBase()
       {
         for (size_t i = 0; i < m_Countries.size(); ++i)
         {
           PointChecker doCheck(m_Countries[i]->m_regions);
-          m_FB.ForEachGeometryPoint(doCheck);
+          m_fb.ForEachGeometryPoint(doCheck);
 
           if (doCheck.m_belongs)
-            m_pPolygonizer->EmitFeature(m_Countries[i], m_FB);
+            m_pPolygonizer->EmitFeature(m_Countries[i], m_fb);
         }
       }
 
@@ -201,7 +214,7 @@ namespace feature
     private:
       Polygonizer * m_pPolygonizer;
       buffer_vector<borders::CountryPolygons const *, 32> m_Countries;
-      FeatureBuilder1 m_FB;
+      FeatureBuilder1 m_fb;
     };
   };
 }

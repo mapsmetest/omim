@@ -3,11 +3,14 @@
 #include "base/string_utils.hpp"
 #include "base/logging.hpp"
 
-#include "std/iomanip.hpp"
-#include "std/fstream.hpp"
-#include "std/bind.hpp"
-#include "std/unordered_map.hpp"
+#include <functional>
+#include <fstream>
+#include <iomanip>
+#include <map>
+#include <unordered_map>
+#include <vector>
 
+#include <sstream>
 
 /// internal function in base
 namespace strings { UniChar LowerUniChar(UniChar c); }
@@ -18,9 +21,9 @@ UNIT_TEST(LowerUniChar)
 
   // To use Platform class here, we need to add many link stuff into .pro file ...
   //string const fName = GetPlatform().WritablePathForFile("CaseFolding.test");
-  string const fName = "../../../omim/data/CaseFolding.test";
+  std::string const fName = "../../../omim/data/CaseFolding.test";
 
-  ifstream file(fName.c_str());
+  std::ifstream file(fName.c_str());
   if (!file.good())
   {
     LOG(LWARNING, ("Can't open unicode test file", fName));
@@ -28,12 +31,12 @@ UNIT_TEST(LowerUniChar)
   }
 
   size_t fCount = 0, cCount = 0;
-  typedef unordered_map<strings::UniChar, strings::UniString> mymap;
+  typedef std::unordered_map<strings::UniChar, strings::UniString> mymap;
   mymap m;
-  string line;
+  std::string line;
   while (file.good())
   {
-    getline(file, line);
+    std::getline(file, line);
     // strip comments
     size_t const sharp = line.find('#');
     if (sharp != string::npos)
@@ -41,18 +44,18 @@ UNIT_TEST(LowerUniChar)
     strings::SimpleTokenizer semicolon(line, ";");
     if (!semicolon)
       continue;
-    string const capital = *semicolon;
-    istringstream stream(capital);
+    std::string const capital = *semicolon;
+    std::istringstream stream(capital);
     strings::UniChar uc;
-    stream >> hex >> uc;
+    stream >> std::hex >> uc;
     ++semicolon;
-    string const type = *semicolon;
+    std::string const type = *semicolon;
     if (type == " S" || type == " T")
       continue;
     if (type != " C" && type != " F")
       continue;
     ++semicolon;
-    string const outChars = *semicolon;
+    std::string const outChars = *semicolon;
     strings::UniString us;
     strings::SimpleTokenizer spacer(outChars, " ");
     while (spacer)
@@ -60,7 +63,7 @@ UNIT_TEST(LowerUniChar)
       stream.clear();
       stream.str(*spacer);
       strings::UniChar smallCode;
-      stream >> hex >> smallCode;
+      stream >> std::hex >> smallCode;
       us.push_back(smallCode);
       ++spacer;
     }
@@ -98,7 +101,7 @@ UNIT_TEST(LowerUniChar)
 
 UNIT_TEST(MakeLowerCase)
 {
-  string s;
+  std::string s;
 
   s = "THIS_IS_UPPER";
   strings::MakeLowerCaseInplace(s);
@@ -112,7 +115,7 @@ UNIT_TEST(MakeLowerCase)
   strings::MakeLowerCaseInplace(s);
   TEST_EQUAL(s, "this_is_lower", ());
 
-  string const utf8("Hola! 99-\xD0\xA3\xD0\x9F\xD0\xAF\xD0\xA7\xD0\x9A\xD0\x90");
+  std::string const utf8("Hola! 99-\xD0\xA3\xD0\x9F\xD0\xAF\xD0\xA7\xD0\x9A\xD0\x90");
   TEST_EQUAL(strings::MakeLowerCase(utf8),
     "hola! 99-\xD1\x83\xD0\xBF\xD1\x8F\xD1\x87\xD0\xBA\xD0\xB0", ());
 
@@ -134,8 +137,11 @@ UNIT_TEST(EqualNoCase)
 
 UNIT_TEST(to_double)
 {
-  string s;
+  std::string s;
   double d;
+
+  s = "";
+  TEST(!strings::to_double(s, d), ());
 
   s = "0.123";
   TEST(strings::to_double(s, d), ());
@@ -159,12 +165,23 @@ UNIT_TEST(to_double)
 
   s = "labuda";
   TEST(!strings::to_double(s, d), ());
+
+  s = "123.456 we don't parse it.";
+  TEST(!strings::to_double(s, d), ());
+
+  TEST(!strings::to_double("INF", d), ());
+  TEST(!strings::to_double("NAN", d), ());
+  TEST(!strings::to_double("1.18973e+4932", d), ());
 }
 
 UNIT_TEST(to_int)
 {
   int i;
-  string s;
+  std::string s;
+
+  s = "AF";
+  TEST(strings::to_int(s, i, 16), ());
+  TEST_EQUAL(175, i, ());
 
   s = "-2";
   TEST(strings::to_int(s, i), ());
@@ -180,16 +197,52 @@ UNIT_TEST(to_int)
 
   s = "labuda";
   TEST(!strings::to_int(s, i), ());
+}
+
+UNIT_TEST(to_uint)
+{
+  unsigned int i;
+  std::string s;
+
+  s = "";
+  TEST(!strings::to_uint(s, i), ());
+
+  s = "-2";
+  TEST(!strings::to_uint(s, i), ());
+
+  s = "0";
+  TEST(strings::to_uint(s, i), ());
+  TEST_EQUAL(0, i, ());
+
+  s = "123456789123456789123456789";
+  TEST(!strings::to_uint(s, i), ());
+
+  s = "labuda";
+  TEST(!strings::to_uint(s, i), ());
 
   s = "AF";
-  TEST(strings::to_int(s, i, 16), ());
+  TEST(strings::to_uint(s, i, 16), ());
   TEST_EQUAL(175, i, ());
+
+  s = "100";
+  TEST(strings::to_uint(s, i), ());
+  TEST_EQUAL(100, i, ());
+
+  s = "4294967295";
+  TEST(strings::to_uint(s, i), ());
+  TEST_EQUAL(0xFFFFFFFF, i, ());
+
+  s = "4294967296";
+  TEST(!strings::to_uint(s, i), ());
 }
 
 UNIT_TEST(to_uint64)
 {
   uint64_t i;
-  string s;
+  std::string s;
+
+  s = "";
+  TEST(!strings::to_uint64(s, i), ());
 
   s = "0";
   TEST(strings::to_uint64(s, i), ());
@@ -206,7 +259,7 @@ UNIT_TEST(to_uint64)
 UNIT_TEST(to_int64)
 {
   int64_t i;
-  string s;
+  std::string s;
 
   s = "-24567";
   TEST(strings::to_int64(s, i), ());
@@ -243,6 +296,9 @@ UNIT_TEST(to_string)
 
   TEST_EQUAL(strings::to_string(123456789123456789ULL), "123456789123456789", ());
   TEST_EQUAL(strings::to_string(-987654321987654321LL), "-987654321987654321", ());
+
+  uint64_t const n = std::numeric_limits<uint64_t>::max();
+  TEST_EQUAL(strings::to_string(n), "18446744073709551615", ());
 }
 
 UNIT_TEST(to_string_dac)
@@ -277,37 +333,52 @@ UNIT_TEST(to_string_dac)
 struct FunctorTester
 {
   size_t & m_index;
-  vector<string> const & m_tokens;
+  std::vector<std::string> const & m_tokens;
 
-  explicit FunctorTester(size_t & counter, vector<string> const & tokens)
-    : m_index(counter), m_tokens(tokens) {}
-  void operator()(string const & s)
+  FunctorTester(size_t & counter, std::vector<std::string> const & tokens)
+    : m_index(counter), m_tokens(tokens)
+  {
+  }
+
+  void operator()(std::string const & s)
   {
     TEST_EQUAL(s, m_tokens[m_index++], ());
   }
 };
 
-void TestIter(string const & str, char const * delims, vector<string> const & tokens)
+void TestIter(std::string const & s, char const * delims, std::vector<std::string> const & tokens)
 {
-  strings::SimpleTokenizer it(str, delims);
+  strings::SimpleTokenizer it(s, delims);
   for (size_t i = 0; i < tokens.size(); ++i)
   {
-    TEST_EQUAL(true, it, (str, delims, i));
-    TEST_EQUAL(i == tokens.size() - 1, it.IsLast(), ());
-    TEST_EQUAL(*it, tokens[i], (str, delims, i));
+    TEST(it, (s, delims, i));
+    TEST_EQUAL(*it, tokens[i], (s, delims, i));
     ++it;
   }
-  TEST_EQUAL(false, it, (str, delims));
+  TEST(!it, (s, delims));
 
   size_t counter = 0;
-  FunctorTester f = FunctorTester(counter, tokens);
-  strings::Tokenize(str, delims, f);
+  FunctorTester f(counter, tokens);
+  strings::Tokenize(s, delims, f);
   TEST_EQUAL(counter, tokens.size(), ());
+}
+
+void TestIterWithEmptyTokens(std::string const & s, char const * delims, std::vector<std::string> const & tokens)
+{
+  strings::SimpleTokenizerWithEmptyTokens it(s, delims);
+
+  for (size_t i = 0; i < tokens.size(); ++i)
+  {
+    TEST(it, (s, delims, i));
+    TEST_EQUAL(*it, tokens[i], (s, delims, i));
+    ++it;
+  }
+  TEST(!it, (s, delims));
 }
 
 UNIT_TEST(SimpleTokenizer)
 {
-  vector<string> tokens;
+  std::vector<std::string> tokens;
   TestIter("", "", tokens);
   TestIter("", "; ", tokens);
   TestIter("  : ;  , ;", "; :,", tokens);
@@ -343,6 +414,51 @@ UNIT_TEST(SimpleTokenizer)
     tokens.assign(&s[0], &s[0] + ARRAY_SIZE(s));
     TestIter("/1/2/", "/", tokens);
   }
+
+  {
+    std::string const s = "";
+    std::vector<std::string> const tokens = {""};
+    TestIterWithEmptyTokens(s, ",", tokens);
+  }
+
+  {
+    std::string const s = ";";
+    std::vector<std::string> const tokens = {"", ""};
+    TestIterWithEmptyTokens(s, ";", tokens);
+  }
+
+  {
+    std::string const s = ";;";
+    std::vector<std::string> const tokens = {"", "", ""};
+    TestIterWithEmptyTokens(s, ";", tokens);
+  }
+
+  {
+    std::string const s = "Hello, World!";
+    std::vector<std::string> const tokens = {s};
+    TestIterWithEmptyTokens(s, "", tokens);
+  }
+
+  {
+    std::string const s = "Hello, World!";
+    std::vector<std::string> const tokens = {"Hello", " World", ""};
+    TestIterWithEmptyTokens(s, ",!", tokens);
+  }
+
+  {
+    std::string const s = ";a;b;;c;d;";
+    std::vector<std::string> const tokens = {"", "a", "b", "", "c", "d", ""};
+    TestIterWithEmptyTokens(s, ";", tokens);
+  }
+}
+
+UNIT_TEST(Tokenize)
+{
+  {
+    std::initializer_list<std::string> expected{"acb", "def", "ghi"};
+    TEST_EQUAL(strings::Tokenize<std::vector>("acb def ghi", " " /* delims */), std::vector<std::string>(expected), ());
+    TEST_EQUAL(strings::Tokenize<std::set>("acb def ghi", " " /* delims */), std::set<std::string>(expected), ());
+  }
 }
 
 UNIT_TEST(LastUniChar)
@@ -354,7 +470,7 @@ UNIT_TEST(LastUniChar)
 
 UNIT_TEST(GetUniString)
 {
-  string const s = "Hello, \xD0\x9C\xD0\xB8\xD0\xBD\xD1\x81\xD0\xBA!";
+  std::string const s = "Hello, \xD0\x9C\xD0\xB8\xD0\xBD\xD1\x81\xD0\xBA!";
   strings::SimpleTokenizer iter(s, ", !");
   {
     strings::UniChar const s[] = { 'H', 'e', 'l', 'l', 'o' };
@@ -389,12 +505,12 @@ UNIT_TEST(Normalize)
 UNIT_TEST(Normalize_Special)
 {
   {
-    string const utf8 = "ąĄćłŁÓŻźŃĘęĆ";
+    std::string const utf8 = "ąĄćłŁÓŻźŃĘęĆ";
     TEST_EQUAL(strings::ToUtf8(strings::Normalize(strings::MakeUniString(utf8))), "aAclLOZzNEeC", ());
   }
 
   {
-    string const utf8 = "əüöğ";
+    std::string const utf8 = "əüöğ";
     TEST_EQUAL(strings::ToUtf8(strings::Normalize(strings::MakeUniString(utf8))), "əuog", ());
   }
 }
@@ -403,27 +519,50 @@ UNIT_TEST(UniStringToUtf8)
 {
   char const utf8Text[] = "У нас исходники хранятся в Utf8!";
   strings::UniString uniS = strings::MakeUniString(utf8Text);
-  TEST_EQUAL(string(utf8Text), strings::ToUtf8(uniS), ());
+  TEST_EQUAL(std::string(utf8Text), strings::ToUtf8(uniS), ());
 }
 
 UNIT_TEST(StartsWith)
 {
   using namespace strings;
 
-  TEST(StartsWith(string(), ""), ());
+  TEST(StartsWith(std::string(), ""), ());
 
-  string s("xyz");
+  std::string s("xyz");
   TEST(StartsWith(s, ""), ());
   TEST(StartsWith(s, "x"), ());
   TEST(StartsWith(s, "xyz"), ());
   TEST(!StartsWith(s, "xyzabc"), ());
   TEST(!StartsWith(s, "ayz"), ());
   TEST(!StartsWith(s, "axy"), ());
+
+  UniString const us = MakeUniString(s);
+  TEST(StartsWith(us, UniString()), ());
+  TEST(StartsWith(us, MakeUniString("x")), ());
+  TEST(StartsWith(us, MakeUniString("xyz")), ());
+  TEST(!StartsWith(us, MakeUniString("xyzabc")), ());
+  TEST(!StartsWith(us, MakeUniString("ayz")), ());
+  TEST(!StartsWith(us, MakeUniString("axy")), ());
+}
+
+UNIT_TEST(EndsWith)
+{
+  using namespace strings;
+  TEST(EndsWith(std::string(), ""), ());
+
+  std::string s("xyz");
+  TEST(EndsWith(s, ""), ());
+  TEST(EndsWith(s, "z"), ());
+  TEST(EndsWith(s, "yz"), ());
+  TEST(EndsWith(s, "xyz"), ());
+  TEST(!EndsWith(s, "abcxyz"), ());
+  TEST(!EndsWith(s, "ayz"), ());
+  TEST(!EndsWith(s, "axyz"), ());
 }
 
 UNIT_TEST(UniString_LessAndEqualsAndNotEquals)
 {
-  vector<strings::UniString> v;
+  std::vector<strings::UniString> v;
   v.push_back(strings::MakeUniString(""));
   v.push_back(strings::MakeUniString("Tes"));
   v.push_back(strings::MakeUniString("Test"));
@@ -540,4 +679,79 @@ UNIT_TEST(AlmostEqual)
   TEST(!AlmostEqual("MKAD, 600 km", "MKAD, 599 km", 2), ());
   TEST(!AlmostEqual("MKAD, 45-y kilometre", "MKAD, 46", 2), ());
   TEST(!AlmostEqual("ул. Героев Панфиловцев", "ул. Планерная", 2), ());
+
+  std::string small(10, '\0');
+  std::string large(1000, '\0');
+  TEST(AlmostEqual(small, large, large.length()), ());
+  TEST(AlmostEqual(large, small, large.length()), ());
+}
+
+UNIT_TEST(EditDistance)
+{
+  auto testEditDistance = [](std::string const & s1, std::string const & s2, uint32_t expected)
+  {
+    TEST_EQUAL(strings::EditDistance(s1.begin(), s1.end(), s2.begin(), s2.end()), expected, ());
+  };
+
+  testEditDistance("", "wwwww", 5);
+  testEditDistance("", "", 0);
+  testEditDistance("abc", "def", 3);
+  testEditDistance("zzzvvv", "zzzvvv", 0);
+  testEditDistance("a", "A", 1);
+  testEditDistance("bbbbb", "qbbbbb", 1);
+  testEditDistance("aaaaaa", "aaabaaa", 1);
+  testEditDistance("aaaab", "aaaac", 1);
+  testEditDistance("a spaces test", "aspacestest", 2);
+
+  auto testUniStringEditDistance =
+      [](std::string const & utf1, std::string const & utf2, uint32_t expected)
+  {
+    auto s1 = strings::MakeUniString(utf1);
+    auto s2 = strings::MakeUniString(utf2);
+    TEST_EQUAL(strings::EditDistance(s1.begin(), s1.end(), s2.begin(), s2.end()), expected, ());
+  };
+
+  testUniStringEditDistance("ll", "l1", 1);
+  testUniStringEditDistance("\u0132ij", "\u0133IJ", 3);
+}
+
+UNIT_TEST(NormalizeDigits)
+{
+  auto const nd = [](std::string str) -> std::string
+  {
+    strings::NormalizeDigits(str);
+    return str;
+  };
+  TEST_EQUAL(nd(""), "", ());
+  TEST_EQUAL(nd("z12345／／"), "z12345／／", ());
+  TEST_EQUAL(nd("a０１9２ "), "a0192 ", ());
+  TEST_EQUAL(nd("３４５６７８９"), "3456789", ());
+}
+
+UNIT_TEST(NormalizeDigits_UniString)
+{
+  auto const nd = [](std::string const & utf8) -> std::string
+  {
+    strings::UniString us = strings::MakeUniString(utf8);
+    strings::NormalizeDigits(us);
+    return strings::ToUtf8(us);
+  };
+  TEST_EQUAL(nd(""), "", ());
+  TEST_EQUAL(nd("z12345／／"), "z12345／／", ());
+  TEST_EQUAL(nd("a０１9２ "), "a0192 ", ());
+  TEST_EQUAL(nd("３４５６７８９"), "3456789", ());
+}
+
+UNIT_TEST(CSV)
+{
+  std::vector<std::string> target;
+  strings::ParseCSVRow(",Test\\,проверка,0,", ',', target);
+  std::vector<std::string> expected({"", "Test\\", "проверка", "0", ""});
+  TEST_EQUAL(target, expected, ());
+  strings::ParseCSVRow("and there  was none", ' ', target);
+  std::vector<std::string> expected2({"and", "there", "", "was", "none"});
+  TEST_EQUAL(target, expected2, ());
+  strings::ParseCSVRow("", 'q', target);
+  std::vector<std::string> expected3;
+  TEST_EQUAL(target, expected3, ());
 }

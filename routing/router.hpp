@@ -1,56 +1,50 @@
 #pragma once
 
-#include "router_delegate.hpp"
+#include "routing/routing_callbacks.hpp"
+#include "routing/checkpoints.hpp"
+#include "routing/route.hpp"
+#include "routing/router_delegate.hpp"
 
 #include "geometry/point2d.hpp"
+#include "geometry/rect2d.hpp"
 
 #include "base/cancellable.hpp"
 
-#include "std/function.hpp"
-#include "std/string.hpp"
+#include <functional>
+#include <string>
 
 namespace routing
 {
 
-using TCountryFileFn = function<string(m2::PointD const &)>;
+using TCountryFileFn = std::function<std::string(m2::PointD const &)>;
+using CourntryRectFn = std::function<m2::RectD(std::string const & countryId)>;
+using CountryParentNameGetterFn = std::function<std::string(std::string const &)>;
 
 class Route;
 
 /// Routing engine type.
-enum RouterType
+enum class RouterType
 {
-  Vehicle = 0, /// For OSRM vehicle routing
-  Pedestrian   /// For A star pedestrian routing
+  // @TODO It's necessary to rename Vehicle value to Car.
+  Vehicle = 0,  /// For Car routing.
+  Pedestrian,   /// For A star pedestrian routing.
+  Bicycle,      /// For A star bicycle routing.
+  Taxi,         /// For taxi route calculation Vehicle routing is used.
+  Transit,      /// For A star pedestrian + transit routing.
+  Count         /// Number of router types.
 };
 
-string ToString(RouterType type);
+std::string ToString(RouterType type);
+RouterType FromString(std::string const & str);
+std::string DebugPrint(RouterType type);
 
 class IRouter
 {
 public:
-  /// Routing possible statuses enumeration.
-  /// \warning  this enum has JNI mirror!
-  /// \see android/src/com/mapswithme/maps/data/RoutingResultCodesProcessor.java
-  enum ResultCode
-  {
-    NoError = 0,
-    Cancelled = 1,
-    NoCurrentPosition = 2,
-    InconsistentMWMandRoute = 3,
-    RouteFileNotExist = 4,
-    StartPointNotFound = 5,
-    EndPointNotFound = 6,
-    PointsInDifferentMWM = 7,
-    RouteNotFound = 8,
-    NeedMoreMaps = 9,
-    InternalError = 10,
-    FileTooOld = 11
-  };
-
   virtual ~IRouter() {}
 
   /// Return unique name of a router implementation.
-  virtual string GetName() const = 0;
+  virtual std::string GetName() const = 0;
 
   /// Clear all temporary buffers.
   virtual void ClearState() {}
@@ -62,14 +56,14 @@ public:
   /// @param startPoint point to start routing
   /// @param startDirection start direction for routers with high cost of the turnarounds
   /// @param finalPoint target point for route
+  /// @param adjust adjust route to the previous one if possible
   /// @param delegate callback functions and cancellation flag
   /// @param route result route
   /// @return ResultCode error code or NoError if route was initialised
   /// @see Cancellable
-  virtual ResultCode CalculateRoute(m2::PointD const & startPoint,
-                                    m2::PointD const & startDirection,
-                                    m2::PointD const & finalPoint, RouterDelegate const & delegate,
-                                    Route & route) = 0;
+  virtual RouterResultCode CalculateRoute(Checkpoints const & checkpoints,
+                                          m2::PointD const & startDirection, bool adjust,
+                                          RouterDelegate const & delegate, Route & route) = 0;
 };
 
 }  // namespace routing

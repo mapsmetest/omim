@@ -1,18 +1,20 @@
 #include "generator/coastlines_generator.hpp"
+
 #include "generator/feature_builder.hpp"
 
-#include "indexer/point_to_int64.hpp"
+#include "coding/pointd_to_pointu.hpp"
 
 #include "geometry/region2d/binary_operators.hpp"
 
 #include "base/string_utils.hpp"
 #include "base/logging.hpp"
 
-#include "std/bind.hpp"
-#include "std/condition_variable.hpp"
-#include "std/function.hpp"
-#include "std/thread.hpp"
-#include "std/utility.hpp"
+#include <condition_variable>
+#include <functional>
+#include <thread>
+#include <utility>
+
+using namespace std;
 
 typedef m2::RegionI RegionT;
 typedef m2::PointI PointT;
@@ -33,7 +35,7 @@ namespace
 
   inline PointT D2I(m2::PointD const & p)
   {
-    m2::PointU const pu = PointD2PointU(p, POINT_COORD_BITS);
+    m2::PointU const pu = PointDToPointU(p, POINT_COORD_BITS);
     return PointT(static_cast<int32_t>(pu.x), static_cast<int32_t>(pu.y));
   }
 
@@ -109,7 +111,14 @@ namespace
         m_rMain.AddRegionToTree(fb);
       else
       {
-        LOG(LINFO, ("Not merged coastline", fb.GetOsmIdsString()));
+        osm::Id const firstWay = fb.GetFirstOsmId();
+        osm::Id const lastWay = fb.GetLastOsmId();
+        if (firstWay == lastWay)
+          LOG(LINFO, ("Not merged coastline, way", firstWay.GetOsmId(), "(", fb.GetPointsCount(),
+                      "points)"));
+        else
+          LOG(LINFO, ("Not merged coastline, ways", firstWay.GetOsmId(), "to", lastWay.GetOsmId(),
+                      "(", fb.GetPointsCount(), "points)"));
         ++m_notMergedCoastsCount;
         m_totalNotMergedCoastsPoints += fb.GetPointsCount();
       }
@@ -174,7 +183,7 @@ public:
 
   void operator()(PointT const & p)
   {
-    m_points.push_back(PointU2PointD(
+    m_points.push_back(PointUToPointD(
         m2::PointU(static_cast<uint32_t>(p.x), static_cast<uint32_t>(p.y)), POINT_COORD_BITS));
   }
 
@@ -267,7 +276,7 @@ public:
     // Do 'and' with all regions and accumulate the result, including bound region.
     // In 'odd' parts we will have an ocean.
     DoDifference doDiff(rectR);
-    m_index.ForEachInRect(GetLimitRect(rectR), bind<void>(ref(doDiff), _1));
+    m_index.ForEachInRect(GetLimitRect(rectR), bind<void>(ref(doDiff), placeholders::_1));
 
     // Check if too many points for feature.
     if (cell.Level() < kHighLevel && doDiff.GetPointsCount() >= kMaxPoints)
@@ -318,7 +327,7 @@ void CoastlineFeaturesGenerator::GetFeatures(vector<FeatureBuilder1> & features)
       [&features, &featuresMutex, this](RegionInCellSplitter::TCell const & cell, DoDifference & cellData)
       {
         FeatureBuilder1 fb;
-        fb.SetCoastCell(cell.ToInt64(RegionInCellSplitter::kHighLevel + 1), cell.ToString());
+        fb.SetCoastCell(cell.ToInt64(RegionInCellSplitter::kHighLevel + 1));
 
         cellData.AssignGeometry(fb);
         fb.SetArea();

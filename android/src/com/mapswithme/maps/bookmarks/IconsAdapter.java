@@ -7,14 +7,14 @@ import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.ImageView;
 
+import java.util.List;
+
 import com.mapswithme.maps.R;
 import com.mapswithme.maps.bookmarks.data.Icon;
 
-import java.util.List;
-
 public class IconsAdapter extends ArrayAdapter<Icon>
 {
-  private String mCheckedIconType;
+  private int mCheckedIconColor;
 
   public IconsAdapter(Context context, List<Icon> list)
   {
@@ -36,7 +36,7 @@ public class IconsAdapter extends ArrayAdapter<Icon>
       holder = (SpinnerViewHolder) convertView.getTag();
 
     final Icon icon = getItem(position);
-    if (icon.getType().equals(mCheckedIconType))
+    if (icon.getColor() == mCheckedIconColor)
       holder.icon.setImageResource(getItem(position).getSelectedResId());
     else
       holder.icon.setImageResource(getItem(position).getResId());
@@ -44,19 +44,19 @@ public class IconsAdapter extends ArrayAdapter<Icon>
     return convertView;
   }
 
-  private class SpinnerViewHolder
+  private static class SpinnerViewHolder
   {
-    ImageView icon;
+    final ImageView icon;
 
-    public SpinnerViewHolder(View convertView)
+    SpinnerViewHolder(View convertView)
     {
       icon = (ImageView) convertView.findViewById(R.id.iv__color);
     }
   }
 
-  public void chooseItem(String position)
+  public void chooseItem(int position)
   {
-    mCheckedIconType = position;
+    mCheckedIconColor = position;
     notifyDataSetChanged();
   }
 }

@@ -1,38 +1,33 @@
 #pragma once
+
 #include "base/internal/message.hpp"
 #include "base/macros.hpp"
 
-#include "std/exception.hpp"
-#include "std/string.hpp"
+#include <exception>
+#include <string>
 
-class RootException : public exception
+class RootException : public std::exception
 {
 public:
-  RootException(char const * what, string const & msg) : m_What(what), m_Msg(msg)
-  {
-  }
+  RootException(char const * what, std::string const & msg);
 
-  virtual ~RootException() throw()
-  {
-  }
+  virtual ~RootException() noexcept = default;
 
-  virtual char const * what() const throw();
+  std::string const & Msg() const { return m_msg; }
 
-  string const & Msg() const throw()
-  {
-    return m_Msg;
-  }
+  // std::exception overrides:
+  char const * what() const noexcept override { return m_whatWithAscii.c_str(); }
 
 private:
-  char const * m_What;
-  string m_Msg;
+  std::string m_whatWithAscii;
+  std::string m_msg;
 };
 
 #define DECLARE_EXCEPTION(exception_name, base_exception) \
   class exception_name : public base_exception \
   { \
   public: \
-    exception_name(char const * what, string const & msg) : base_exception(what, msg) {} \
+    exception_name(char const * what, std::string const & msg) : base_exception(what, msg) {} \
   }
 
 // TODO: Use SRC_LOGGING macro.

@@ -1,6 +1,8 @@
+#include "indexer/classificator.hpp"
 #include "indexer/drules_selector.hpp"
 #include "indexer/drules_selector_parser.hpp"
 #include "indexer/ftypes_matcher.hpp"
+#include "indexer/scales.hpp"
 
 #include "base/assert.hpp"
 #include "base/logging.hpp"
@@ -95,10 +97,73 @@ private:
   TType const m_value;
 };
 
+uint32_t TagSelectorToType(string value)
+{
+  vector<string> path;
+  strings::ParseCSVRow(value, '=', path);
+  return path.size() > 0 && path.size() <= 2 ? classif().GetTypeByPathSafe(path) : 0;
+}
+
+class TypeSelector : public ISelector
+{
+public:
+  TypeSelector(uint32_t type, SelectorOperatorType op) : m_type(type)
+  {
+    m_equals = op == SelectorOperatorEqual;
+  }
+
+  bool Test(FeatureType const & ft) const override
+  {
+    bool found = false;
+    ft.ForEachType([&found, this](uint32_t type)
+    {
+      ftype::TruncValue(type, ftype::GetLevel(m_type));
+      if (type == m_type)
+        found = true;
+    });
+    return found == m_equals;
+  }
+
+private:
+  uint32_t m_type;
+  bool m_equals;
+};
+
 // Feature tag value evaluator for tag 'population'
-bool GetPopulation(FeatureType const & ft, uint32_t & population)
+bool GetPopulation(FeatureType const & ft, uint64_t & population)
 {
   population = ftypes::GetPopulation(ft);
+  return true;
+}
+
+// Feature tag value evaluator for tag 'name'
+bool GetName(FeatureType const & ft, string & name)
+{
+  ft.GetReadableName(name);
+  return true;
+}
+
+// Feature tag value evaluator for tag 'bbox_area' (bounding box area in sq.meters)
+bool GetBoundingBoxArea(FeatureType const & ft, double & sqM)
+{
+  if (feature::GEOM_AREA != ft.GetFeatureType())
+    return false;
+
+  m2::RectD const rect = ft.GetLimitRect(scales::GetUpperScale());
+
+  sqM = MercatorBounds::AreaOnEarth(rect.LeftTop(), rect.LeftBottom(), rect.RightBottom()) +
+        MercatorBounds::AreaOnEarth(rect.LeftTop(), rect.RightTop(), rect.RightBottom());
+  return true;
+}
+
+// Feature tag value evaluator for tag 'rating'
+bool GetRating(FeatureType const & ft, double & rating)
+{
+  double constexpr kDefaultRating = 0.0;
+
+  string ratingStr = ft.GetMetadata().Get(feature::Metadata::FMD_RATING);
+  if (ratingStr.empty() || !strings::to_double(ratingStr, rating))
+    rating = kDefaultRating;
   return true;
 }
 
@@ -112,27 +177,63 @@ unique_ptr<ISelector> ParseSelector(string const & str)
   if (!ParseSelector(str, e))
   {
     // bad string format
-    LOG(LDEBUG, ("Invalid selector format: ", str));
+    LOG(LDEBUG, ("Invalid selector format:", str));
     return unique_ptr<ISelector>();
   }
 
-  // Tag 'population'
   if (e.m_tag == "population")
   {
-    int value = 0;
-    if (!e.m_value.empty() && (!strings::to_int(e.m_value, value) || value < 0))
+    uint64_t value = 0;
+    if (!e.m_value.empty() && !strings::to_uint64(e.m_value, value))
     {
       // bad string format
-      LOG(LDEBUG, ("Invalid selector: ", str));
+      LOG(LDEBUG, ("Invalid selector:", str));
       return unique_ptr<ISelector>();
     }
-    return make_unique<Selector<uint32_t>>(&GetPopulation, e.m_operator, static_cast<uint32_t>(value));
+    return make_unique<Selector<uint64_t>>(&GetPopulation, e.m_operator, value);
+  }
+  else if (e.m_tag == "name")
+  {
+    return make_unique<Selector<string>>(&GetName, e.m_operator, e.m_value);
+  }
+  else if (e.m_tag == "bbox_area")
+  {
+    double value = 0;
+    if (!e.m_value.empty() && (!strings::to_double(e.m_value, value) || value < 0))
+    {
+      // bad string format
+      LOG(LDEBUG, ("Invalid selector:", str));
+      return unique_ptr<ISelector>();
+    }
+    return make_unique<Selector<double>>(&GetBoundingBoxArea, e.m_operator, value);
+  }
+  else if (e.m_tag == "rating")
+  {
+    double value = 0;
+    if (!e.m_value.empty() && (!strings::to_double(e.m_value, value) || value < 0))
+    {
+      // bad string format
+      LOG(LDEBUG, ("Invalid selector:", str));
+      return unique_ptr<ISelector>();
+    }
+    return make_unique<Selector<double>>(&GetRating, e.m_operator, value);
+  }
+  else if (e.m_tag == "extra_tag")
+  {
+    uint32_t const type = TagSelectorToType(e.m_value);
+    if (type == 0)
+    {
+      // Type was not found.
+      LOG(LDEBUG, ("Invalid selector:", str));
+      return unique_ptr<ISelector>();
+    }
+    return make_unique<TypeSelector>(type, e.m_operator);
   }
 
   // Add new tag here
 
   // unrecognized selector
-  LOG(LDEBUG, ("Unrecognized selector: ", str));
+  LOG(LDEBUG, ("Unrecognized selector:", str));
   return unique_ptr<ISelector>();
 }
 
@@ -145,7 +246,7 @@ unique_ptr<ISelector> ParseSelector(vector<string> const & strs)
     unique_ptr<ISelector> s = ParseSelector(str);
     if (nullptr == s)
     {
-      LOG(LDEBUG, ("Invalid composite selector: ", str));
+      LOG(LDEBUG, ("Invalid composite selector:", str));
       return unique_ptr<ISelector>();
     }
     cs->Add(move(s));

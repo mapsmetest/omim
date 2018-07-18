@@ -2,13 +2,16 @@ package com.mapswithme.maps.bookmarks.data;
 
 import android.os.Parcel;
 import android.os.Parcelable;
+import android.support.annotation.IntRange;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 
 import java.util.HashMap;
 import java.util.Map;
 
 public class Metadata implements Parcelable
 {
-  // values MUST correspond to definitions from feature_meta.hpp
+  // Values must correspond to definitions from feature_meta.hpp.
   public enum MetadataType
   {
     FMD_CUISINE(1),
@@ -24,40 +27,55 @@ public class Metadata implements Parcelable
     FMD_TURN_LANES(11),
     FMD_TURN_LANES_FORWARD(12),
     FMD_TURN_LANES_BACKWARD(13),
-    FMD_EMAIL(14);
+    FMD_EMAIL(14),
+    FMD_POSTCODE(15),
+    // TODO: It is hacked in jni and returns full Wikipedia url. Should use separate getter instead.
+    FMD_WIKIPEDIA(16),
+    FMD_MAXSPEED(17),
+    FMD_FLATS(18),
+    FMD_HEIGHT(19),
+    FMD_MIN_HEIGHT(20),
+    FMD_DENOMINATION(21),
+    FMD_BUILDING_LEVELS(22),
+    FMD_SPONSORED_ID(24),
+    FMD_PRICE_RATE(25),
+    FMD_RATING(26),
+    FMD_BANNER_URL(27),
+    FMD_LEVEL(28);
 
-    private int mMetaType;
+    private final int mMetaType;
 
     MetadataType(int metadataType)
     {
       mMetaType = metadataType;
     }
 
-    public static MetadataType fromInt(int metaType)
+    @NonNull
+    public static MetadataType fromInt(@IntRange(from = 1, to = 28) int metaType)
     {
       for (MetadataType type : values())
         if (type.mMetaType == metaType)
           return type;
 
-      return null;
+      throw new IllegalArgumentException("Illegal metaType arg!");
+    }
+
+    public int toInt()
+    {
+      return mMetaType;
     }
   }
 
-  private Map<MetadataType, String> mMetadataMap = new HashMap<>();
+  private final Map<MetadataType, String> mMetadataMap = new HashMap<>();
 
   /**
    * Adds metadata with type code and value. Returns false if metaType is wrong or unknown
    *
-   * @param metaType
-   * @param metaValue
    * @return true, if metadata was added, false otherwise
    */
-  public boolean addMetadata(int metaType, String metaValue)
+  boolean addMetadata(int metaType, String metaValue)
   {
     final MetadataType type = MetadataType.fromInt(metaType);
-    if (type == null)
-      return false;
-
     mMetadataMap.put(type, metaValue);
     return true;
   }
@@ -65,8 +83,6 @@ public class Metadata implements Parcelable
   /**
    * Adds metadata with type and value.
    *
-   * @param type
-   * @param value
    * @return true, if metadata was added, false otherwise
    */
   public boolean addMetadata(MetadataType type, String value)
@@ -75,11 +91,8 @@ public class Metadata implements Parcelable
     return true;
   }
 
-  /**
-   * @param type
-   * @return null if metadata doesn't exist
-   */
-  public String getMetadata(MetadataType type)
+  @Nullable
+  String getMetadata(MetadataType type)
   {
     return mMetadataMap.get(type);
   }

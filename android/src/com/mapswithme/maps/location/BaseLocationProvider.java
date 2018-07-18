@@ -1,34 +1,43 @@
 package com.mapswithme.maps.location;
 
+import android.support.annotation.NonNull;
 
-import android.location.Location;
-
-import com.mapswithme.util.LocationUtils;
 import com.mapswithme.util.log.Logger;
-import com.mapswithme.util.log.SimpleLogger;
+import com.mapswithme.util.log.LoggerFactory;
 
-public abstract class BaseLocationProvider
+abstract class BaseLocationProvider
 {
-  protected static final long LOCATION_UPDATE_INTERVAL = 500;
-  public static final double DEFAULT_SPEED_MPS = 5;
-  public static final float DISTANCE_TO_RECREATE_MAGNETIC_FIELD_M = 1000;
-
-  protected static final Logger mLogger = SimpleLogger.get(BaseLocationProvider.class.getName());
-
-  protected abstract void startUpdates();
-
-  protected abstract void stopUpdates();
-
-  protected boolean isLocationBetterThanLast(Location newLocation)
+  static final Logger LOGGER = LoggerFactory.INSTANCE.getLogger(LoggerFactory.Type.LOCATION);
+  private static final String TAG = BaseLocationProvider.class.getSimpleName();
+  @NonNull
+  private final LocationFixChecker mLocationFixChecker;
+  private boolean mActive;
+  @NonNull
+  LocationFixChecker getLocationFixChecker()
   {
-    if (newLocation == null)
-      return false;
+    return mLocationFixChecker;
+  }
 
-    final Location lastLocation = LocationHelper.INSTANCE.getLastLocation();
-    if (lastLocation == null)
-      return true;
+  BaseLocationProvider(@NonNull LocationFixChecker locationFixChecker)
+  {
+    mLocationFixChecker = locationFixChecker;
+  }
 
-    final double s = Math.max(DEFAULT_SPEED_MPS, (newLocation.getSpeed() + lastLocation.getSpeed()) / 2.0);
-    return (newLocation.getAccuracy() < (lastLocation.getAccuracy() + s * LocationUtils.getDiffWithLastLocation(lastLocation, newLocation)));
+  protected abstract void start();
+  protected abstract void stop();
+
+  /**
+   * Indicates whether this provider is providing location updates or not
+   * @return true - if locations are actively coming from this provider, false - otherwise
+   */
+  public final boolean isActive()
+  {
+    return mActive;
+  }
+
+  final void setActive(boolean active)
+  {
+    LOGGER.d(TAG, "setActive active = " + active);
+    mActive = active;
   }
 }

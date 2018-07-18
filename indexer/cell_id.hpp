@@ -1,53 +1,51 @@
 #pragma once
-#include "indexer/mercator.hpp"
-#include "indexer/point_to_int64.hpp"
+
+#include "geometry/cellid.hpp"
+#include "geometry/mercator.hpp"
+#include "geometry/rect2d.hpp"
 
 #include "base/assert.hpp"
 
+#include <cstdint>
+#include <utility>
 
-template <int MinX, int MinY, int MaxX, int MaxY>
-struct Bounds
-{
-  enum
-  {
-    minX = MinX,
-    maxX = MaxX,
-    minY = MinY,
-    maxY = MaxY
-  };
-};
+using RectId = m2::CellId<19>;
 
-//typedef Bounds<-180, -90, 180, 90> OrthoBounds;
+// 24 is enough to have cell size < 2.5m * 2.5m for world.
+constexpr int kGeoObjectsDepthLevels = 24;
 
-template <typename BoundsT, typename CellIdT>
+// Cell size < 40m * 40m for world is good for regions.
+constexpr int kRegionsDepthLevels = 20;
+
+template <typename Bounds, typename CellId>
 class CellIdConverter
 {
 public:
   static double XToCellIdX(double x)
   {
-    return (x - BoundsT::minX) / StepX();
+    return (x - Bounds::minX) / StepX();
   }
   static double YToCellIdY(double y)
   {
-    return (y - BoundsT::minY) / StepY();
+    return (y - Bounds::minY) / StepY();
   }
 
   static double CellIdXToX(double  x)
   {
-    return (x*StepX() + BoundsT::minX);
+    return (x*StepX() + Bounds::minX);
   }
   static double CellIdYToY(double y)
   {
-    return (y*StepY() + BoundsT::minY);
+    return (y*StepY() + Bounds::minY);
   }
 
-  static CellIdT ToCellId(double x, double y)
+  static CellId ToCellId(double x, double y)
   {
     uint32_t const ix = static_cast<uint32_t>(XToCellIdX(x));
     uint32_t const iy = static_cast<uint32_t>(YToCellIdY(y));
-    CellIdT id = CellIdT::FromXY(ix, iy, CellIdT::DEPTH_LEVELS - 1);
+    CellId id = CellId::FromXY(ix, iy, CellId::DEPTH_LEVELS - 1);
 #if 0 // DEBUG
-    pair<uint32_t, uint32_t> ixy = id.XY();
+    std::pair<uint32_t, uint32_t> ixy = id.XY();
     ASSERT(Abs(ixy.first  - ix) <= 1, (x, y, id, ixy));
     ASSERT(Abs(ixy.second - iy) <= 1, (x, y, id, ixy));
     CoordT minX, minY, maxX, maxY;
@@ -58,50 +56,50 @@ public:
     return id;
   }
 
-  static CellIdT Cover2PointsWithCell(double x1, double y1, double x2, double y2)
+  static CellId Cover2PointsWithCell(double x1, double y1, double x2, double y2)
   {
-    CellIdT id1 = ToCellId(x1, y1);
-    CellIdT id2 = ToCellId(x2, y2);
+    CellId id1 = ToCellId(x1, y1);
+    CellId id2 = ToCellId(x2, y2);
     while (id1 != id2)
     {
       id1 = id1.Parent();
       id2 = id2.Parent();
     }
 #if 0 // DEBUG
-    CoordT minX, minY, maxX, maxY;
+    double minX, minY, maxX, maxY;
     GetCellBounds(id1, minX, minY, maxX, maxY);
-    ASSERT(minX <= x1 && x1 <= maxX, (x1, y1, x2, y2, id1, minX, minY, maxX, maxY));
-    ASSERT(minX <= x2 && x2 <= maxX, (x1, y1, x2, y2, id1, minX, minY, maxX, maxY));
-    ASSERT(minY <= y1 && y1 <= maxY, (x1, y1, x2, y2, id1, minX, minY, maxX, maxY));
-    ASSERT(minY <= y2 && y2 <= maxY, (x1, y1, x2, y2, id1, minX, minY, maxX, maxY));
+    ASSERT(my::between_s(minX, maxX, x1), (x1, minX, maxX));
+    ASSERT(my::between_s(minX, maxX, x2), (x2, minX, maxX));
+    ASSERT(my::between_s(minY, maxY, y1), (y1, minY, maxY));
+    ASSERT(my::between_s(minY, maxY, y2), (y2, minY, maxY));
 #endif
     return id1;
   }
 
-  static m2::PointD FromCellId(CellIdT id)
+  static m2::PointD FromCellId(CellId id)
   {
-    pair<uint32_t, uint32_t> const xy = id.XY();
+    std::pair<uint32_t, uint32_t> const xy = id.XY();
     return m2::PointD(CellIdXToX(xy.first), CellIdYToY(xy.second));
   }
 
-  static void GetCellBounds(CellIdT id,
+  static void GetCellBounds(CellId id,
                             double & minX, double & minY, double & maxX, double & maxY)
   {
-    pair<uint32_t, uint32_t> const xy = id.XY();
+    std::pair<uint32_t, uint32_t> const xy = id.XY();
     uint32_t const r = id.Radius();
-    minX = (xy.first - r) * StepX() + BoundsT::minX;
-    maxX = (xy.first + r) * StepX() + BoundsT::minX;
-    minY = (xy.second - r) * StepY() + BoundsT::minY;
-    maxY = (xy.second + r) * StepY() + BoundsT::minY;
+    minX = (xy.first - r) * StepX() + Bounds::minX;
+    maxX = (xy.first + r) * StepX() + Bounds::minX;
+    minY = (xy.second - r) * StepY() + Bounds::minY;
+    maxY = (xy.second + r) * StepY() + Bounds::minY;
   }
 
 private:
   inline static double StepX()
   {
-    return double(BoundsT::maxX - BoundsT::minX) / CellIdT::MAX_COORD;
+    return double(Bounds::maxX - Bounds::minX) / CellId::MAX_COORD;
   }
   inline static double StepY()
   {
-    return double(BoundsT::maxY - BoundsT::minY) / CellIdT::MAX_COORD;
+    return double(Bounds::maxY - Bounds::minY) / CellId::MAX_COORD;
   }
 };

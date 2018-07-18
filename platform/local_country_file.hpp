@@ -31,10 +31,15 @@ public:
   // Creates an instance holding a path to countryFile's in a
   // directory. Note that no disk operations are not performed until
   // SyncWithDisk() is called.
+  // The directory must containt a full path to the country file.
   LocalCountryFile(string const & directory, CountryFile const & countryFile, int64_t version);
 
   // Syncs internal state like availability of map and routing files,
   // their sizes etc. with disk.
+  // In case of one component (single) mwm this method assumed the every mwm has a routing section.
+  // Generality speaking it's not always true. To know it for sure it's necessary to read a mwm in
+  // this method but it's not implemented by performance reasons. This check is done on
+  // building routes stage.
   void SyncWithDisk();
 
   // Removes specified files from disk if they're known for LocalCountryFile, i.e.
@@ -47,32 +52,34 @@ public:
 
   // Returns size of a file. Return value may be zero until
   // SyncWithDisk() is called.
-  uint32_t GetSize(MapOptions filesMask) const;
+  uint64_t GetSize(MapOptions filesMask) const;
 
   // Returns a mask of all known country files. Return value may be
   // empty until SyncWithDisk() is called.
-  inline MapOptions GetFiles() const { return m_files; }
+  MapOptions GetFiles() const { return m_files; }
 
   // Checks whether files specified in filesMask are on disk. Return
   // value will be false until SyncWithDisk() is called.
-  inline bool OnDisk(MapOptions filesMask) const
+  bool OnDisk(MapOptions filesMask) const
   {
     return (static_cast<unsigned>(m_files) & static_cast<unsigned>(filesMask)) ==
            static_cast<unsigned>(filesMask);
   }
 
-  inline string const & GetDirectory() const { return m_directory; }
-  inline string const & GetCountryName() const { return m_countryFile.GetNameWithoutExt(); }
-  inline int64_t GetVersion() const { return m_version; }
-  inline CountryFile const & GetCountryFile() const { return m_countryFile; }
+  string const & GetDirectory() const { return m_directory; }
+  string const & GetCountryName() const { return m_countryFile.GetName(); }
+  int64_t GetVersion() const { return m_version; }
+  CountryFile const & GetCountryFile() const { return m_countryFile; }
+  CountryFile & GetCountryFile() { return m_countryFile; }
 
   bool operator<(LocalCountryFile const & rhs) const;
   bool operator==(LocalCountryFile const & rhs) const;
+  bool operator!=(LocalCountryFile const & rhs) const { return !(*this == rhs); }
 
   // Creates LocalCountryFile for test purposes, for a country region
   // with countryFileName (without any extensions). Automatically
   // performs sync with disk.
-  static LocalCountryFile MakeForTesting(string const & countryFileName);
+  static LocalCountryFile MakeForTesting(string const & countryFileName, int64_t version = 0);
 
   /// @todo The easiest solution for now. Need to be removed in future.
   /// @param fullPath Full path to the mwm file.
@@ -81,7 +88,8 @@ public:
 private:
   friend string DebugPrint(LocalCountryFile const &);
   friend void UnitTest_LocalCountryFile_DirectoryLookup();
-  friend void FindAllLocalMaps(vector<LocalCountryFile> & localFiles);
+  friend void FindAllLocalMapsAndCleanup(int64_t latestVersion,
+                                         string const & dataDir, vector<LocalCountryFile> & localFiles);
 
   /// @note! If directory is empty, the file is stored in resources.
   /// In this case, the only valid params are m_countryFile and m_version.
@@ -91,7 +99,11 @@ private:
 
   MapOptions m_files;
 
+  /// Size of file which contains map section in bytes. It's mwm file in any case.
   uint64_t m_mapSize;
+  /// Size of file which contains routing section in bytes.
+  /// It's .mwm.routing file in case of big (two component) mwms.
+  /// And m_routingSize == 0 for small (one compontent) mwms.
   uint64_t m_routingSize;
 };
 

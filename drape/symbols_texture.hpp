@@ -4,6 +4,7 @@
 
 #include "std/string.hpp"
 #include "std/map.hpp"
+#include "std/vector.hpp"
 
 namespace dp
 {
@@ -29,17 +30,26 @@ public:
     virtual ResourceType GetType() const;
   };
 
-  void Load(string const & skinPathName);
-  RefPointer<ResourceInfo> FindResource(Key const & key) const;
+  SymbolsTexture(std::string const & skinPathName, std::string const & textureName,
+                 ref_ptr<HWTextureAllocator> allocator);
 
+  ref_ptr<ResourceInfo> FindResource(Key const & key, bool & newResource) override;
+
+  void Invalidate(string const & skinPathName, ref_ptr<HWTextureAllocator> allocator);
+
+  bool IsSymbolContained(std::string const & symbolName) const;
+
+  static bool DecodeToMemory(std::string const & skinPathName, std::string const & textureName,
+                             vector<uint8_t> & symbolsSkin,
+                             std::map<string, m2::RectU> & symbolsIndex,
+                             uint32_t & skinWidth, uint32_t & skinHeight);
 private:
   void Fail();
+  void Load(std::string const & skinPathName, ref_ptr<HWTextureAllocator> allocator);
 
-private:
-  typedef map<string, SymbolInfo> TSymDefinition;
+  using TSymDefinition = map<std::string, SymbolInfo>;
+  std::string m_name;
   mutable TSymDefinition m_definition;
-
-  class DefinitionLoader;
 };
 
 } // namespace dp

@@ -1,4 +1,6 @@
 #pragma once
+
+#include "base/assert.hpp"
 #include "base/base.hpp"
 
 namespace my
@@ -14,13 +16,11 @@ namespace my
 #define ARRAY_SIZE(X) sizeof(::my::impl::ArraySize(X))
 
 #define DISALLOW_COPY(className)                             \
-private:                                                     \
   className(className const &) = delete;                     \
   className & operator=(className const &) = delete
 
 
 #define DISALLOW_MOVE(className)                             \
-private:                                                     \
   className(className &&) = delete;                          \
   className & operator=(className &&) = delete
 

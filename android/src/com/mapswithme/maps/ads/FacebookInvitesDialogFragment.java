@@ -13,7 +13,7 @@ import com.facebook.share.model.AppInviteContent;
 import com.facebook.share.widget.AppInviteDialog;
 import com.mapswithme.maps.R;
 import com.mapswithme.maps.base.BaseMwmDialogFragment;
-import com.mapswithme.util.UiUtils;
+import com.mapswithme.util.DialogUtils;
 import com.mapswithme.util.statistics.Statistics;
 
 public class FacebookInvitesDialogFragment extends BaseMwmDialogFragment
@@ -21,7 +21,6 @@ public class FacebookInvitesDialogFragment extends BaseMwmDialogFragment
   private static final String INVITE_APP_URL = "https://fb.me/958251974218933";
   private static final String INVITE_IMAGE = "http://maps.me/images/fb_app_invite_banner.png";
 
-  private static final String TAG = FacebookInvitesDialogFragment.class.getSimpleName();
   private boolean mHasInvited;
 
   @NonNull
@@ -32,27 +31,25 @@ public class FacebookInvitesDialogFragment extends BaseMwmDialogFragment
     final LayoutInflater inflater = getActivity().getLayoutInflater();
 
     final View root = inflater.inflate(R.layout.fragment_app_invites_dialog, null);
-    builder.
-        setView(root).
-        setNegativeButton(R.string.remind_me_later, new DialogInterface.OnClickListener()
-        {
-          @Override
-          public void onClick(DialogInterface dialog, int which)
-          {
-            Statistics.INSTANCE.trackSimpleNamedEvent(Statistics.EventName.FACEBOOK_INVITE_LATER);
-          }
-        }).
-        setPositiveButton(R.string.ok, new DialogInterface.OnClickListener() {
-          @Override
-          public void onClick(DialogInterface dialog, int which)
-          {
-            mHasInvited = true;
-            showAppInviteDialog();
-            Statistics.INSTANCE.trackSimpleNamedEvent(Statistics.EventName.FACEBOOK_INVITE_INVITED);
-          }
-        });
-
-    return builder.create();
+    return builder.setView(root)
+                  .setNegativeButton(R.string.remind_me_later, new DialogInterface.OnClickListener()
+                  {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which)
+                    {
+                      Statistics.INSTANCE.trackEvent(Statistics.EventName.FACEBOOK_INVITE_LATER);
+                    }
+                  })
+                  .setPositiveButton(R.string.share, new DialogInterface.OnClickListener()
+                  {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which)
+                    {
+                      mHasInvited = true;
+                      showAppInviteDialog();
+                      Statistics.INSTANCE.trackEvent(Statistics.EventName.FACEBOOK_INVITE_INVITED);
+                    }
+                  }).create();
   }
 
   @Override
@@ -67,7 +64,7 @@ public class FacebookInvitesDialogFragment extends BaseMwmDialogFragment
   public void onCancel(DialogInterface dialog)
   {
     super.onCancel(dialog);
-    Statistics.INSTANCE.trackSimpleNamedEvent(Statistics.EventName.FACEBOOK_INVITE_LATER);
+    Statistics.INSTANCE.trackEvent(Statistics.EventName.FACEBOOK_INVITE_LATER);
   }
 
   private void showAppInviteDialog()
@@ -81,7 +78,7 @@ public class FacebookInvitesDialogFragment extends BaseMwmDialogFragment
       AppInviteDialog.show(this, content);
     else
     {
-      UiUtils.showAlertDialog(getActivity(), R.string.email_error_title);
+      DialogUtils.showAlertDialog(getActivity(), R.string.email_error_title);
       dismiss();
     }
   }

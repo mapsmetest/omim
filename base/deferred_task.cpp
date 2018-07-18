@@ -1,77 +1,49 @@
-#include "base/deferred_task.hpp"
+#include "deferred_task.hpp"
 
-#include "base/timer.hpp"
-#include "base/logging.hpp"
-
-#include "std/algorithm.hpp"
-#include "std/mutex.hpp"
-
-DeferredTask::Routine::Routine(TTask const & task, milliseconds delay, atomic<bool> & started)
-    : m_task(task), m_delay(delay), m_started(started)
+namespace my
 {
-}
-
-void DeferredTask::Routine::Do()
+DeferredTask::DeferredTask(TDuration const & duration) : m_duration(duration)
 {
-  mutex mu;
-  unique_lock<mutex> lock(mu);
-
-  steady_clock::time_point const end = steady_clock::now() + m_delay;
-  while (!IsCancelled())
+  m_thread = threads::SimpleThread([this]
   {
-    steady_clock::time_point const current = steady_clock::now();
-    if (current >= end)
-      break;
-    m_cv.wait_for(lock, end - current, [this]()
+    std::unique_lock<std::mutex> l(m_mutex);
+    while (!m_terminate)
     {
-      return IsCancelled();
-    });
-  }
+      if (!m_fn)
+      {
+        m_cv.wait(l);
+        continue;
+      }
 
-  if (!IsCancelled())
-  {
-    m_started = true;
-    m_task();
-  }
-}
+      if (m_cv.wait_for(l, m_duration) != std::cv_status::timeout || !m_fn)
+        continue;
 
-void DeferredTask::Routine::Cancel()
-{
-  threads::IRoutine::Cancel();
-  m_cv.notify_one();
-}
+      auto fn = move(m_fn);
+      m_fn = nullptr;
 
-DeferredTask::DeferredTask(TTask const & task, milliseconds ms) : m_started(false)
-{
-  m_thread.Create(make_unique<Routine>(task, ms, m_started));
+      l.unlock();
+      fn();
+      l.lock();
+    }
+  });
 }
 
 DeferredTask::~DeferredTask()
 {
-  ASSERT_THREAD_CHECKER(m_threadChecker, ());
-
-  m_thread.Cancel();
+  {
+    std::unique_lock<std::mutex> l(m_mutex);
+    m_terminate = true;
+  }
+  m_cv.notify_one();
+  m_thread.join();
 }
 
-bool DeferredTask::WasStarted() const
+void DeferredTask::Drop()
 {
-  ASSERT_THREAD_CHECKER(m_threadChecker, ());
-
-  return m_started;
+  {
+    std::unique_lock<std::mutex> l(m_mutex);
+    m_fn = nullptr;
+  }
+  m_cv.notify_one();
 }
-
-void DeferredTask::Cancel()
-{
-  ASSERT_THREAD_CHECKER(m_threadChecker, ());
-
-  threads::IRoutine * routine = m_thread.GetRoutine();
-  CHECK(routine, ());
-  routine->Cancel();
-}
-
-void DeferredTask::WaitForCompletion()
-{
-  ASSERT_THREAD_CHECKER(m_threadChecker, ());
-
-  m_thread.Join();
-}
+}  // namespace my

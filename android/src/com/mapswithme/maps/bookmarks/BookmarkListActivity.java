@@ -1,41 +1,48 @@
 package com.mapswithme.maps.bookmarks;
 
-import android.os.Bundle;
+import android.support.annotation.CallSuper;
+import android.support.annotation.NonNull;
+import android.support.annotation.StyleRes;
 import android.support.v4.app.Fragment;
-import android.support.v7.widget.Toolbar;
 
-import com.mapswithme.maps.R;
-import com.mapswithme.maps.base.BaseMwmFragmentActivity;
-import com.mapswithme.util.UiUtils;
+import com.mapswithme.maps.base.BaseToolbarActivity;
+import com.mapswithme.maps.bookmarks.data.BookmarkManager;
+import com.mapswithme.util.ThemeUtils;
 
-public class BookmarkListActivity extends BaseMwmFragmentActivity
+public class BookmarkListActivity extends BaseToolbarActivity
 {
+  @CallSuper
   @Override
-  protected void onCreate(Bundle savedInstanceState)
+  public void onResume()
   {
-    super.onCreate(savedInstanceState);
+    super.onResume();
 
-    final Toolbar toolbar = getToolbar();
-    toolbar.setTitle(R.string.bookmarks);
-    UiUtils.showHomeUpButton(toolbar);
-    displayToolbarAsActionBar();
+    // Disable all notifications in BM on appearance of this activity.
+    // It allows to significantly improve performance in case of bookmarks
+    // modification. All notifications will be sent on activity's disappearance.
+    BookmarkManager.INSTANCE.setNotificationsEnabled(false);
+  }
+
+  @CallSuper
+  @Override
+  public void onPause()
+  {
+    // Allow to send all notifications in BM.
+    BookmarkManager.INSTANCE.setNotificationsEnabled(true);
+
+    super.onPause();
   }
 
   @Override
-  protected int getContentLayoutResId()
+  @StyleRes
+  public int getThemeResourceId(@NonNull String theme)
   {
-    return R.layout.activity_fragment_and_toolbar;
+    return ThemeUtils.getCardBgThemeResourceId(theme);
   }
 
   @Override
   protected Class<? extends Fragment> getFragmentClass()
   {
     return BookmarksListFragment.class;
-  }
-
-  @Override
-  protected int getFragmentContentResId()
-  {
-    return R.id.fragment_container;
   }
 }

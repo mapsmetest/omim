@@ -1,5 +1,3 @@
-#import "Macros.h"
-
 static inline CGPoint SubtractCGPoint(CGPoint p1, CGPoint p2)
 {
   return CGPointMake(p1.x - p2.x, p1.y - p2.y);
@@ -23,10 +21,9 @@ static inline CGFloat LengthCGPoint(CGPoint point)
 @interface NSObject (Optimized)
 
 + (NSString *)className;
-- (void)performAfterDelay:(NSTimeInterval)delayInSec block:(void (^)(void))block;
+- (void)performAfterDelay:(NSTimeInterval)delayInSec block:(MWMVoidBlock)block;
 
 @end
-
 
 @interface UIColor (HexColor)
 
@@ -50,30 +47,32 @@ static inline CGFloat LengthCGPoint(CGPoint point)
 @property (nonatomic) CGFloat height;
 @property (nonatomic) CGSize size;
 
-+ (void)animateWithDuration:(NSTimeInterval)duration delay:(NSTimeInterval)delay damping:(double)dampingRatio initialVelocity:(double)springVelocity options:(UIViewAnimationOptions)options animations:(void (^)(void))animations completion:(void (^)(BOOL finished))completion;
++ (void)animateWithDuration:(NSTimeInterval)duration
+                      delay:(NSTimeInterval)delay
+                    damping:(double)dampingRatio
+            initialVelocity:(double)springVelocity
+                    options:(UIViewAnimationOptions)options
+                 animations:(MWMVoidBlock)animations
+                 completion:(void (^)(BOOL finished))completion;
 - (void)sizeToIntegralFit;
 
 @end
 
+@interface UIView (Refresh)
+
+- (void)mwm_refreshUI;
+
+@end
 
 @interface UIApplication (URLs)
 
-- (void)rateVersionFrom:(NSString *)launchPlaceName;
+- (void)rateApp;
 
 @end
-
-
-@interface NSString (Size)
-
-- (CGSize)sizeWithDrawSize:(CGSize)size font:(UIFont *)font;
-
-@end
-
 
 @interface SolidTouchView : UIView
 
 @end
-
 
 @interface SolidTouchImageView : UIImageView
 
@@ -97,10 +96,9 @@ typedef void (^MWMAlertViewCompletionBlock) (UIAlertView * alertView, NSInteger 
 
 @end
 
-@interface UINavigationController (Autorotate)
+@interface UIViewController (Safari)
 
-- (BOOL)shouldAutorotate;
-- (NSUInteger)supportedInterfaceOrientations;
+- (void)openUrl:(NSURL *)url;
 
 @end
 

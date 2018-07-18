@@ -1,135 +1,59 @@
-#include "Framework.hpp"
+#include "com/mapswithme/maps/Framework.hpp"
 
-#include "../core/jni_helper.hpp"
+#include "com/mapswithme/util/crashlytics.h"
 
-#include "../platform/Platform.hpp"
+#include "com/mapswithme/platform/GuiThread.hpp"
+#include "com/mapswithme/platform/Platform.hpp"
 
-#include "map/information_display.hpp"
-#include "map/location_state.hpp"
+#include "com/mapswithme/core/jni_helper.hpp"
 
-#include "platform/settings.hpp"
-
+crashlytics_context_t * g_crashlytics;
 
 extern "C"
 {
+  // void nativeInitPlatform(String apkPath, String storagePath, String privatePath, String tmpPath,
+  // String obbGooglePath, String flavorName, String buildType, boolean isTablet);
   JNIEXPORT void JNICALL
-  Java_com_mapswithme_maps_MwmApplication_nativeInit(
-      JNIEnv * env, jobject thiz,
-      jstring apkPath, jstring storagePath, jstring tmpPath, jstring obbGooglePath,
-      jstring flavorName, jstring buildType, jboolean isYota, jboolean isTablet)
+  Java_com_mapswithme_maps_MwmApplication_nativeInitPlatform(JNIEnv * env, jobject thiz,
+                                                             jstring apkPath, jstring storagePath,
+                                                             jstring privatePath, jstring tmpPath,
+                                                             jstring obbGooglePath,
+                                                             jstring flavorName, jstring buildType,
+                                                             jboolean isTablet)
   {
-    android::Platform::Instance().Initialize(
-        env, apkPath, storagePath, tmpPath, obbGooglePath, flavorName, buildType, isYota, isTablet);
+    android::Platform::Instance().Initialize(env, thiz, apkPath, storagePath, privatePath, tmpPath,
+                                             obbGooglePath, flavorName, buildType, isTablet);
+  }
 
-    LOG(LDEBUG, ("Creating android::Framework instance ..."));
-
+  // static void nativeInitFramework();
+  JNIEXPORT void JNICALL
+  Java_com_mapswithme_maps_MwmApplication_nativeInitFramework(JNIEnv * env, jclass clazz)
+  {
     if (!g_framework)
-      g_framework = new android::Framework();
-
-    LOG(LDEBUG, ("android::Framework created"));
+      g_framework = make_unique<android::Framework>();
   }
 
-  JNIEXPORT jboolean JNICALL
-  Java_com_mapswithme_maps_MwmApplication_nativeIsBenchmarking(JNIEnv * env, jobject thiz)
-  {
-    return static_cast<jboolean>(g_framework->NativeFramework()->IsBenchmarking());
-  }
-
-  JNIEXPORT jboolean JNICALL
-  Java_com_mapswithme_maps_MwmApplication_nativeGetBoolean(JNIEnv * env,
-                                                           jobject thiz,
-                                                           jstring name,
-                                                           jboolean defaultVal)
-  {
-    bool val = defaultVal;
-    Settings::Get(jni::ToNativeString(env, name), val);
-    return val;
-  }
-
+  // static void nativeProcessTask(long taskPointer);
   JNIEXPORT void JNICALL
-  Java_com_mapswithme_maps_MwmApplication_nativeSetBoolean(JNIEnv * env,
-                                                           jobject thiz,
-                                                           jstring name,
-                                                           jboolean val)
+  Java_com_mapswithme_maps_MwmApplication_nativeProcessTask(JNIEnv * env, jclass clazz, jlong taskPointer)
   {
-    bool flag = val;
-    (void)Settings::Set(jni::ToNativeString(env, name), flag);
+    android::GuiThread::ProcessTask(taskPointer);
   }
 
-  JNIEXPORT jboolean JNICALL
-  Java_com_mapswithme_maps_MwmApplication_hasFreeSpace(JNIEnv * env, jobject thiz, jlong size)
-  {
-    return android::Platform::Instance().HasAvailableSpaceForWriting(size);
-  }
-
+  // static void nativeAddLocalization(String name, String value);
   JNIEXPORT void JNICALL
-  Java_com_mapswithme_maps_MwmApplication_nativeAddLocalization(JNIEnv * env, jobject thiz, jstring name, jstring value)
+  Java_com_mapswithme_maps_MwmApplication_nativeAddLocalization(JNIEnv * env, jclass clazz, jstring name, jstring value)
   {
     g_framework->AddString(jni::ToNativeString(env, name),
                            jni::ToNativeString(env, value));
   }
 
-  JNIEXPORT jint JNICALL
-  Java_com_mapswithme_maps_MwmApplication_nativeGetInt(JNIEnv * env, jobject thiz, jstring name, jint defaultValue)
-  {
-    jint value;
-    if (Settings::Get(jni::ToNativeString(env, name), value))
-      return value;
-
-    return defaultValue;
-  }
-
+  // @UiThread
+  // static void nativeInitCrashlytics();
   JNIEXPORT void JNICALL
-  Java_com_mapswithme_maps_MwmApplication_nativeSetInt(JNIEnv * env, jobject thiz, jstring name, jint value)
+  Java_com_mapswithme_maps_MwmApplication_nativeInitCrashlytics(JNIEnv * env, jclass clazz)
   {
-    (void)Settings::Set(jni::ToNativeString(env, name), value);
-  }
-
-  JNIEXPORT jlong JNICALL
-  Java_com_mapswithme_maps_MwmApplication_nativeGetLong(JNIEnv * env, jobject thiz, jstring name, jlong defaultValue)
-  {
-    jlong value;
-    if (Settings::Get(jni::ToNativeString(env, name), value))
-      return value;
-
-    return defaultValue;
-  }
-
-  JNIEXPORT void JNICALL
-  Java_com_mapswithme_maps_MwmApplication_nativeSetLong(JNIEnv * env, jobject thiz, jstring name, jlong value)
-  {
-    (void)Settings::Set(jni::ToNativeString(env, name), value);
-  }
-
-  JNIEXPORT jdouble JNICALL
-  Java_com_mapswithme_maps_MwmApplication_nativeGetDouble(JNIEnv * env, jobject thiz, jstring name, jdouble defaultValue)
-  {
-    jdouble value;
-    if (Settings::Get(jni::ToNativeString(env, name), value))
-      return value;
-
-    return defaultValue;
-  }
-
-  JNIEXPORT void JNICALL
-  Java_com_mapswithme_maps_MwmApplication_nativeSetDouble(JNIEnv * env, jobject thiz, jstring name, jdouble value)
-  {
-    (void)Settings::Set(jni::ToNativeString(env, name), value);
-  }
-
-  JNIEXPORT void JNICALL
-  Java_com_mapswithme_maps_MwmApplication_nativeSetString(JNIEnv * env, jobject thiz, jstring name, jstring value)
-  {
-    (void)Settings::Set(jni::ToNativeString(env, name), jni::ToNativeString(env, value));
-  }
-
-  JNIEXPORT jstring JNICALL
-  Java_com_mapswithme_maps_MwmApplication_nativeGetString(JNIEnv * env, jobject thiz, jstring name, jstring defaultValue)
-  {
-    string value;
-    if (Settings::Get(jni::ToNativeString(env, name), value))
-      return jni::ToJavaString(env, value);
-
-    return defaultValue;
+    ASSERT(!g_crashlytics, ());
+    g_crashlytics = crashlytics_init();
   }
 }

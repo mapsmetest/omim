@@ -27,10 +27,12 @@
 
 #include <boost/math/constants/constants.hpp>
 #include <boost/math/special_functions/fpclassify.hpp>
-#include <boost/math/special_functions/round.hpp>
+//#include <boost/math/special_functions/round.hpp>
 #include <boost/numeric/conversion/cast.hpp>
 #include <boost/type_traits/is_fundamental.hpp>
 #include <boost/type_traits/is_integral.hpp>
+
+#include <boost/geometry/core/cs.hpp>
 
 #include <boost/geometry/util/select_most_precise.hpp>
 
@@ -69,6 +71,19 @@ inline T const& greatest(T const& v1, T const& v2, T const& v3, T const& v4, T c
 }
 
 
+template <typename T>
+inline T bounded(T const& v, T const& lower, T const& upper)
+{
+    return (std::min)((std::max)(v, lower), upper);
+}
+
+template <typename T>
+inline T bounded(T const& v, T const& lower)
+{
+    return (std::max)(v, lower);
+}
+
+
 template <typename T,
           bool IsFloatingPoint = boost::is_floating_point<T>::value>
 struct abs
@@ -85,6 +100,9 @@ struct abs<T, true>
 {
     static inline T apply(T const& value)
     {
+        using ::fabs;
+        using std::fabs; // for long double
+
         return fabs(value);
     }
 };
@@ -198,11 +216,36 @@ struct smaller<Type, true>
 {
     static inline bool apply(Type const& a, Type const& b)
     {
-        if (equals<Type, true>::apply(a, b, equals_default_policy()))
+        if (!(a < b)) // a >= b
         {
             return false;
         }
-        return a < b;
+        
+        return ! equals<Type, true>::apply(b, a, equals_default_policy());
+    }
+};
+
+template <typename Type,
+          bool IsFloatingPoint = boost::is_floating_point<Type>::value>
+struct smaller_or_equals
+{
+    static inline bool apply(Type const& a, Type const& b)
+    {
+        return a <= b;
+    }
+};
+
+template <typename Type>
+struct smaller_or_equals<Type, true>
+{
+    static inline bool apply(Type const& a, Type const& b)
+    {
+        if (a <= b)
+        {
+            return true;
+        }
+
+        return equals<Type, true>::apply(a, b, equals_default_policy());
     }
 };
 
@@ -404,11 +447,35 @@ struct relaxed_epsilon
     }
 };
 
+// This must be consistent with math::equals.
+// By default math::equals() scales the error by epsilon using the greater of
+// compared values but here is only one value, though it should work the same way.
+// (a-a) <= max(a, a) * EPS       -> 0 <= a*EPS
+// (a+da-a) <= max(a+da, a) * EPS -> da <= (a+da)*EPS
+template <typename T, bool IsFloat = boost::is_floating_point<T>::value>
+struct scaled_epsilon
+{
+    static inline T apply(T const& val)
+    {
+        return (std::max)(abs<T>::apply(val), T(1))
+                    * std::numeric_limits<T>::epsilon();
+    }
+};
+
+template <typename T>
+struct scaled_epsilon<T, false>
+{
+    static inline T apply(T const&)
+    {
+        return T(0);
+    }
+};
+
 // ItoF ItoI FtoF
 template <typename Result, typename Source,
           bool ResultIsInteger = std::numeric_limits<Result>::is_integer,
           bool SourceIsInteger = std::numeric_limits<Source>::is_integer>
-struct round
+struct rounding_cast
 {
     static inline Result apply(Source const& v)
     {
@@ -416,16 +483,25 @@ struct round
     }
 };
 
+// TtoT
+template <typename Source, bool ResultIsInteger, bool SourceIsInteger>
+struct rounding_cast<Source, Source, ResultIsInteger, SourceIsInteger>
+{
+    static inline Source apply(Source const& v)
+    {
+        return v;
+    }
+};
+
 // FtoI
 template <typename Result, typename Source>
-struct round<Result, Source, true, false>
+struct rounding_cast<Result, Source, true, false>
 {
     static inline Result apply(Source const& v)
     {
-        namespace bmp = boost::math::policies;
-        // ignore rounding errors for backward compatibility
-        typedef bmp::policy< bmp::rounding_error<bmp::ignore_error> > policy;
-        return boost::numeric_cast<Result>(boost::math::round(v, policy()));
+        return boost::numeric_cast<Result>(v < Source(0) ?
+                                            v - Source(0.5) :
+                                            v + Source(0.5));
     }
 };
 
@@ -448,8 +524,14 @@ inline T relaxed_epsilon(T const& factor)
     return detail::relaxed_epsilon<T>::apply(factor);
 }
 
+template <typename T>
+inline T scaled_epsilon(T const& value)
+{
+    return detail::scaled_epsilon<T>::apply(value);
+}
 
-// Maybe replace this by boost equals or boost ublas numeric equals or so
+
+// Maybe replace this by boost equals or so
 
 /*!
     \brief returns true if both arguments are equal.
@@ -500,6 +582,24 @@ inline bool larger(T1 const& a, T2 const& b)
         >::apply(b, a);
 }
 
+template <typename T1, typename T2>
+inline bool smaller_or_equals(T1 const& a, T2 const& b)
+{
+    return detail::smaller_or_equals
+        <
+            typename select_most_precise<T1, T2>::type
+        >::apply(a, b);
+}
+
+template <typename T1, typename T2>
+inline bool larger_or_equals(T1 const& a, T2 const& b)
+{
+    return detail::smaller_or_equals
+        <
+            typename select_most_precise<T1, T2>::type
+        >::apply(b, a);
+}
+
 
 template <typename T>
 inline T d2r()
@@ -513,6 +613,65 @@ inline T r2d()
 {
     static T const conversion_coefficient = T(180.0) / geometry::math::pi<T>();
     return conversion_coefficient;
+}
+
+
+#ifndef DOXYGEN_NO_DETAIL
+namespace detail {
+
+template <typename DegreeOrRadian>
+struct as_radian
+{
+    template <typename T>
+    static inline T apply(T const& value)
+    {
+        return value;
+    }
+};
+
+template <>
+struct as_radian<degree>
+{
+    template <typename T>
+    static inline T apply(T const& value)
+    {
+        return value * d2r<T>();
+    }
+};
+
+template <typename DegreeOrRadian>
+struct from_radian
+{
+    template <typename T>
+    static inline T apply(T const& value)
+    {
+        return value;
+    }
+};
+
+template <>
+struct from_radian<degree>
+{
+    template <typename T>
+    static inline T apply(T const& value)
+    {
+        return value * r2d<T>();
+    }
+};
+
+} // namespace detail
+#endif
+
+template <typename DegreeOrRadian, typename T>
+inline T as_radian(T const& value)
+{
+    return detail::as_radian<DegreeOrRadian>::apply(value);
+}
+
+template <typename DegreeOrRadian, typename T>
+inline T from_radian(T const& value)
+{
+    return detail::from_radian<DegreeOrRadian>::apply(value);
 }
 
 
@@ -592,23 +751,24 @@ inline T abs(T const& value)
 \ingroup utility
 */
 template <typename T>
-static inline int sign(T const& value)
+inline int sign(T const& value)
 {
     T const zero = T();
     return value > zero ? 1 : value < zero ? -1 : 0;
 }
 
 /*!
-\brief Short utility to calculate the rounded value of a number.
+\brief Short utility to cast a value possibly rounding it to the nearest
+       integral value.
 \ingroup utility
 \note If the source T is NOT an integral type and Result is an integral type
       the value is rounded towards the closest integral value. Otherwise it's
-      casted.
+      casted without rounding.
 */
 template <typename Result, typename T>
-inline Result round(T const& v)
+inline Result rounding_cast(T const& v)
 {
-    return detail::round<Result, T>::apply(v);
+    return detail::rounding_cast<Result, T>::apply(v);
 }
 
 } // namespace math

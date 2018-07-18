@@ -1,10 +1,10 @@
 #include "coding/file_writer.hpp"
 #include "coding/internal/file_data.hpp"
 
-FileWriter::FileWriter(FileWriter const & rhs)
-: Writer(*this), m_bTruncOnClose(rhs.m_bTruncOnClose)
+
+FileWriter::FileWriter(FileWriter && rhs)
+: m_pFileData(move(rhs.m_pFileData)), m_bTruncOnClose(rhs.m_bTruncOnClose)
 {
-  m_pFileData.swap(const_cast<FileWriter &>(rhs).m_pFileData);
 }
 
 FileWriter::FileWriter(string const & fileName, FileWriter::Op op, bool bTruncOnClose)
@@ -23,14 +23,13 @@ FileWriter::~FileWriter()
   }
 }
 
-int64_t FileWriter::Pos() const
+uint64_t FileWriter::Pos() const
 {
   return m_pFileData->Pos();
 }
 
-void FileWriter::Seek(int64_t pos)
+void FileWriter::Seek(uint64_t pos)
 {
-  ASSERT_GREATER_OR_EQUAL(pos, 0, ());
   m_pFileData->Seek(pos);
 }
 

@@ -3,16 +3,14 @@
               android:layout_width="match_parent"
               android:layout_height="wrap_content"
               android:orientation="vertical">
-
   <android.support.v7.widget.Toolbar
       android:id="@+id/toolbar"
       style="@style/MwmWidget.ToolbarStyle"
       android:layout_width="match_parent"
       android:layout_height="?attr/actionBarSize"
-      android:theme="@style/MwmWidget.ToolbarTheme"/>
+      android:theme="@style/MwmWidget.ToolbarTheme.DownButton"/>
 
   <FrameLayout
-      android:id="@+id/fl__elevation"
       style="@style/MwmWidget.FrameLayout.Elevation"
       android:layout_width="match_parent"
       android:layout_height="wrap_content"/>

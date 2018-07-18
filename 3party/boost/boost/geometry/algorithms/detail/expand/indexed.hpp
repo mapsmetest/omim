@@ -5,16 +5,17 @@
 // Copyright (c) 2009-2015 Mateusz Loskot, London, UK.
 // Copyright (c) 2014-2015 Samuel Debionne, Grenoble, France.
 
-// This file was modified by Oracle on 2015.
-// Modifications copyright (c) 2015, Oracle and/or its affiliates.
+// This file was modified by Oracle on 2015, 2016.
+// Modifications copyright (c) 2015-2016, Oracle and/or its affiliates.
 
+// Contributed and/or modified by Vissarion Fysikopoulos, on behalf of Oracle
 // Contributed and/or modified by Menelaos Karavelas, on behalf of Oracle
 
 // Parts of Boost.Geometry are redesigned from Geodan's Geographic Library
 // (geolib/GGL), copyright (c) 1995-2010 Geodan, Amsterdam, the Netherlands.
 
-// Use, modification and distribution is subject to the Boost Software License,
-// Version 1.0. (See accompanying file LICENSE_1_0.txt or copy at
+// Distributed under the Boost Software License, Version 1.0.
+// (See accompanying file LICENSE_1_0.txt or copy at
 // http://www.boost.org/LICENSE_1_0.txt)
 
 #ifndef BOOST_GEOMETRY_ALGORITHMS_DETAIL_EXPAND_INDEXED_HPP
@@ -23,7 +24,6 @@
 #include <cstddef>
 
 #include <boost/geometry/core/access.hpp>
-#include <boost/geometry/core/coordinate_dimension.hpp>
 #include <boost/geometry/core/tags.hpp>
 
 #include <boost/geometry/util/select_coordinate_type.hpp>
@@ -50,8 +50,8 @@ template
 >
 struct indexed_loop
 {
-    template <typename Box, typename Geometry>
-    static inline void apply(Box& box, Geometry const& source)
+    template <typename Box, typename Geometry, typename Strategy>
+    static inline void apply(Box& box, Geometry const& source, Strategy const& strategy)
     {
         typedef typename strategy::compare::detail::select_strategy
             <
@@ -88,7 +88,7 @@ struct indexed_loop
             <
                 StrategyLess, StrategyGreater,
                 Index, Dimension + 1, DimensionCount
-            >::apply(box, source);
+            >::apply(box, source, strategy);
     }
 };
 
@@ -104,8 +104,8 @@ struct indexed_loop
         Index, DimensionCount, DimensionCount
     >
 {
-    template <typename Box, typename Geometry>
-    static inline void apply(Box&, Geometry const&) {}
+    template <typename Box, typename Geometry, typename Strategy>
+    static inline void apply(Box&, Geometry const&, Strategy const&) {}
 };
 
 
@@ -113,24 +113,27 @@ struct indexed_loop
 // Changes a box such that the other box is also contained by the box
 template
 <
+    std::size_t Dimension, std::size_t DimensionCount,
     typename StrategyLess, typename StrategyGreater
 >
 struct expand_indexed
 {
-    template <typename Box, typename Geometry>
-    static inline void apply(Box& box, Geometry const& geometry)
+    template <typename Box, typename Geometry, typename Strategy>
+    static inline void apply(Box& box,
+                             Geometry const& geometry,
+                             Strategy const& strategy)
     {
         indexed_loop
             <
                 StrategyLess, StrategyGreater,
-                0, 0, dimension<Geometry>::type::value
-            >::apply(box, geometry);
+                0, Dimension, DimensionCount
+            >::apply(box, geometry, strategy);
 
         indexed_loop
             <
                 StrategyLess, StrategyGreater,
-                1, 0, dimension<Geometry>::type::value
-            >::apply(box, geometry);
+                1, Dimension, DimensionCount
+            >::apply(box, geometry, strategy);
     }
 };
 

@@ -1,16 +1,15 @@
 #include "map/geourl_process.hpp"
 
+#include "geometry/mercator.hpp"
 #include "indexer/scales.hpp"
-#include "indexer/mercator.hpp"
 
 #include "coding/uri.hpp"
 
-#include "base/string_utils.hpp"
-#include "base/regexp.hpp"
 #include "base/logging.hpp"
+#include "base/string_utils.hpp"
 
 #include "std/bind.hpp"
-
+#include "std/regex.hpp"
 
 namespace url_scheme
 {
@@ -79,7 +78,7 @@ namespace url_scheme
 
   class LatLonParser
   {
-    regexp::RegExpT m_regexp;
+    regex m_regexp;
     Info & m_info;
     int m_latPriority, m_lonPriority;
 
@@ -113,9 +112,11 @@ namespace url_scheme
 
   public:
     LatLonParser(Info & info)
-      : m_info(info), m_latPriority(-1), m_lonPriority(-1)
+      : m_regexp("-?\\d+\\.{1}\\d*, *-?\\d+\\.{1}\\d*")
+      , m_info(info)
+      , m_latPriority(-1)
+      , m_lonPriority(-1)
     {
-      regexp::Create("-?\\d+\\.?\\d*, *-?\\d+\\.?\\d*", m_regexp);
     }
 
     bool IsValid() const
@@ -123,23 +124,23 @@ namespace url_scheme
       return (m_latPriority == m_lonPriority && m_latPriority != -1);
     }
 
-    void operator()(string const & key, string const & value)
+    bool operator()(string const & key, string const & value)
     {
       if (key == "z" || key == "zoom")
       {
         double x;
         if (strings::to_double(value, x))
           m_info.SetZoom(x);
-        return;
+        return true;
       }
 
       int const priority = GetCoordinatesPriority(key);
       if (priority == -1 || priority < m_latPriority || priority < m_lonPriority)
-        return;
+        return false;
 
       if (priority != LL_PRIORITY)
       {
-        regexp::ForEachMatched(value, m_regexp, AssignCoordinates(*this, priority));
+        strings::ForEachMatched(value, m_regexp, AssignCoordinates(*this, priority));
       }
       else
       {
@@ -148,17 +149,20 @@ namespace url_scheme
         {
           if (key == "lat")
           {
-            if (m_info.SetLat(x))
-              m_latPriority = priority;
+            if (!m_info.SetLat(x))
+              return false;
+            m_latPriority = priority;
           }
           else
           {
             ASSERT_EQUAL(key, "lon", ());
-            if (m_info.SetLon(x))
-              m_lonPriority = priority;
+            if (!m_info.SetLon(x))
+              return false;
+            m_lonPriority = priority;
           }
         }
       }
+      return true;
     }
   };
 
